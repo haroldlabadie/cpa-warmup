@@ -1,0 +1,13 @@
+# 合并到 CPA plugins.configs；目录和端口以容器内真实配置为准。
+plugins:
+  enabled: true
+  dir: /CLIProxyAPI/plugins
+  configs:
+    cpa-warmup:
+      enabled: true
+      priority: 50
+      observe: true
+      data_dir: /CLIProxyAPI/plugins/cpa-warmup
+      secret_file: /CLIProxyAPI/plugins/cpa-warmup/secrets.json
+      cpa_url: http://127.0.0.1:8317
+      cpamp_url: http://cpamp:18317

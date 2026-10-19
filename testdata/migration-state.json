@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "plugin": "cpa-warmup",
+  "migration": {
+    "id": "4be02002-84f6-48ea-9561-1a539cdb1dea",
+    "source_sha256": "a1e1ddcee34c933eea69067b0b1c73c23bbca87f05ca3b74a8bb7830039362cd",
+    "source_version": 2,
+    "created_ms": 1792418510286,
+    "proofs": {
+      "legacy_top": {
+        "unknown_top": {
+          "数字": [
+            1.0,
+            123456789012345678901
+          ]
+        }
+      },
+      "legacy_revisions": {},
+      "counts": {
+        "accounts": 1,
+        "slot_groups": 1,
+        "slot_records": 1,
+        "unresolved": 1
+      },
+      "identity_blocked": {}
+    }
+  },
+  "legacy": {
+    "version": 2,
+    "accounts": {
+      "unicode-凭证.json": {
+        "provider": "codex",
+        "owned_revision": {
+          "mtime_ns": 1792418510282254374,
+          "token_hash": "4ac6f8dafeade86f54029610190d7a983aa028c11865413a53e18a09e578f8a2",
+          "config_hash": "100ff243c410d02ea88a73515ef4b79185ee64fd6007cea1673e8a29763cf167"
+        },
+        "owned_disable_ms": 100,
+        "unknown": {
+          "中文": "保留"
+        }
+      }
+    },
+    "slots": {
+      "2026-10-19T05:00:00+08:00": {
+        "unicode-凭证.json": {
+          "status": "unconfirmed",
+          "sent_ms": 100,
+          "attempt_token": "uuid-one",
+          "event_id": 123,
+          "trace": "20261019050000-abcd1234-request-one",
+          "unknown_nested": [
+            null,
+            true,
+            1,
+            {
+              "中文": "résumé"
+            }
+          ]
+        }
+      }
+    },
+    "unknown_top": {
+      "数字": [
+        1.0,
+        123456789012345678901
+      ]
+    }
+  },
+  "latest_success": {},
+  "attempt_gates": {},
+  "identities": {
+    "unicode-凭证.json": "eb374c0b1ff0c65e6c8d234a48fa70b2f62cd46ffa78038e3c58a55a5b1f10e2"
+  }
+}

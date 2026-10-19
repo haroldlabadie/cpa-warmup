@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "enabled": true,
+  "slot_hours": [5,10,15,20],
+  "slot_grace_seconds": 5400,
+  "check_seconds": 20,
+  "accounts": [],
+  "models": {"codex":"gpt-6-luna","gemini":"gemini-3.8-flash-high","third_party":"claude-sonnet-4-6"}
+}

@@ -1,0 +1,36 @@
+name: Build and verify
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: test -z "$(gofmt -l .)"
+      - run: make test
+      - run: make build
+      - name: Package
+        run: |
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md config.example.yaml settings.example.json secrets.example.json dist/
+          cd dist
+          rm -f cpa-warmup.h
+          sha256sum cpa-warmup.so cpa-warmup-helper > BINARY_SHA256SUMS
+          zip cpa-warmup_0.1.0_linux_amd64.zip cpa-warmup.so cpa-warmup-helper BINARY_SHA256SUMS README.md LICENSE THIRD_PARTY_NOTICES.md *.example.*
+          sha256sum cpa-warmup_0.1.0_linux_amd64.zip > checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpa-warmup_0.1.0_linux_amd64
+          path: |
+            dist/*.zip
+            dist/checksums.txt

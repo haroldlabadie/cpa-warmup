@@ -1,0 +1,9 @@
+*.so
+*.h
+cpa-warmup-helper
+dist/
+state.json
+settings.json
+secrets.json
+worker.lock
+.warmup-*
