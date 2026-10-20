@@ -193,6 +193,10 @@ func TestReviewSealRejectsFutureMissingSentAndStaleDigest(t *testing.T) {
 	}
 	loaded, _ := loadRecoveryState(dir)
 	digest, _ := stateDigest(&loaded)
+	beforeState, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := recoverRequest{DataDir: dir, StateSHA256: "0" + digest[1:], OperationID: "seal-stale", Account: a, Identity: a.identity(), Action: "seal-and-recover", Operator: "reviewer", Reason: "stale", Apply: true}
 	path := filepath.Join(dir, "request.json")
 	if err := atomicJSON(path, req); err != nil {
@@ -200,6 +204,10 @@ func TestReviewSealRejectsFutureMissingSentAndStaleDigest(t *testing.T) {
 	}
 	if code := recoverIdentityCommand(path); code == 0 {
 		t.Fatal("stale apply digest accepted")
+	}
+	afterState, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil || string(afterState) != string(beforeState) {
+		t.Fatal("rejected stale apply mutated state")
 	}
 
 	dir = t.TempDir()
