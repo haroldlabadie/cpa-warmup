@@ -197,7 +197,11 @@ func TestReviewSealRejectsFutureMissingSentAndStaleDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := recoverRequest{DataDir: dir, StateSHA256: "0" + digest[1:], OperationID: "seal-stale", Account: a, Identity: a.identity(), Action: "seal-and-recover", Operator: "reviewer", Reason: "stale", Apply: true}
+	staleDigest := "0" + digest[1:]
+	if staleDigest == digest {
+		staleDigest = "1" + digest[1:]
+	}
+	req := recoverRequest{DataDir: dir, StateSHA256: staleDigest, OperationID: "seal-stale", Account: a, Identity: a.identity(), Action: "seal-and-recover", Operator: "reviewer", Reason: "stale", Apply: true}
 	path := filepath.Join(dir, "request.json")
 	if err := atomicJSON(path, req); err != nil {
 		t.Fatal(err)
