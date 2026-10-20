@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -47,12 +48,19 @@ func configure(raw []byte) error {
 	if err != nil {
 		return err
 	}
+	secretInfo, err := os.Lstat(cfg.SecretFile)
+	if err != nil || !secretInfo.Mode().IsRegular() || secretInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("secret file must be a regular non-symlink file")
+	}
+	if secretInfo.Size() > 65536 {
+		return errors.New("secret file exceeds size limit")
+	}
 	b, err := readLimited(cfg.SecretFile, 65536)
 	if err != nil {
 		return errors.New("secret file unavailable")
 	}
 	info, err := os.Stat(cfg.SecretFile)
-	if err != nil || info.Mode().Perm()&0077 != 0 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return errors.New("secret file requires mode 0600")
 	}
 	var secrets Secrets
@@ -199,13 +207,16 @@ func intercept(method string, raw []byte) (out []byte, err error) {
 }
 func statusSnapshot(e *Engine) map[string]any {
 	e.mu.Lock()
-	result := map[string]any{"plugin": pluginID, "version": pluginVersion, "instance_nonce": e.instance, "enabled": e.cfg.Enabled, "observe": e.cfg.Observe, "worker_alive": e.running, "quiesced": e.stopped, "last_tick_ms": e.lastTick, "last_error": e.lastError, "revision": e.revision, "next_slot": nextSlot(nowMS(), e.settings)}
-	e.mu.Unlock()
-	e.mu.Lock()
+	result := map[string]any{"plugin": pluginID, "version": pluginVersion, "instance_nonce": e.instance, "enabled": e.cfg.Enabled, "observe": e.cfg.Observe, "worker_alive": e.running, "quiesced": e.stopped, "last_tick_ms": e.lastTick, "last_error": e.lastError, "revision": e.revision, "next_slot": nextSlot(nowMillis(), e.settings)}
 	names := []string{}
 	for name := range e.observations {
 		names = append(names, name)
 	}
+	partial := map[string]string{}
+	for k, v := range e.partialErrors {
+		partial[k] = v
+	}
+	sort.Strings(names)
 	e.mu.Unlock()
 	result["accounts"] = names
 	e.store.mu.Lock()
@@ -217,9 +228,40 @@ func statusSnapshot(e *Engine) map[string]any {
 	var copy any
 	json.Unmarshal(b, &copy)
 	result["slots"] = copy
+	result["partial_errors"] = partial
+	result["families"] = familySnapshot(e.store.state.Slots, e.store.state.IdentityGenerations)
+	result["identity_generations"] = e.store.state.IdentityGenerations
+	result["identity_recovery"] = e.store.state.IdentityRecovery
 	result["active_attempt_count"] = len(e.store.state.AttemptGates)
 	e.store.mu.Unlock()
 	return result
+}
+
+// familySnapshot is a display-only view of the latest decisions for each
+// account/family. It never mutates the journal or invents a successful state.
+func familySnapshot(slots Slots, generations map[string]*Generation) map[string]any {
+	out := map[string]any{}
+	for _, records := range slots {
+		for key, r := range records {
+			name := accountName(key)
+			scope := str(r, "scope")
+			if scope == "" {
+				scope = "all"
+			}
+			entry := obj(out[name])
+			if entry == nil {
+				entry = map[string]any{"unresolved": []any{}, "generation": nil}
+			}
+			if unresolved(r) {
+				entry["unresolved"] = append(entry["unresolved"].([]any), map[string]any{"slot": str(r, "slot"), "scope": scope, "status": str(r, "status"), "reason": str(r, "last_reason")})
+			}
+			if g := generations[name]; g != nil {
+				entry["generation"] = map[string]any{"id": g.ID, "number": g.Generation, "floor_ms": g.FloorMS, "sealed": len(g.Sealed)}
+			}
+			out[name] = entry
+		}
+	}
+	return out
 }
 func revisionETag(r string) string     { return "\"" + r + "\"" }
 func settingsDigest(s Settings) string { b, _ := json.Marshal(s); return hash(string(b)) }

@@ -54,7 +54,7 @@ func TestStorePreservesLegacyUnknownFieldsAndUncertainAttempts(t *testing.T) {
 }
 
 func TestStoreRejectsCorruptionAndReleasesLockOnFailure(t *testing.T) {
-	for _, raw := range []string{`{`, `{"schema":2,"plugin":"cpa-warmup","legacy":{"slots":{}}}`, `{"schema":1,"plugin":"wrong","legacy":{"slots":{}}}`, `{"schema":1,"plugin":"cpa-warmup","legacy":{"slots":null}}`, `{"schema":1,"plugin":"cpa-warmup","legacy":{"slots":{}},"unknown":true}`, `{"schema":1,"plugin":"cpa-warmup","legacy":{"slots":{}}} {}`} {
+	for _, raw := range []string{`{`, `{"schema":3,"plugin":"cpa-warmup","legacy":{"slots":{}}}`, `{"schema":1,"plugin":"wrong","legacy":{"slots":{}}}`, `{"schema":1,"plugin":"cpa-warmup","legacy":{"slots":null}}`, `{"schema":1,"plugin":"cpa-warmup","legacy":{"slots":{}},"unknown":true}`, `{"schema":1,"plugin":"cpa-warmup","legacy":{"slots":{}}} {}`} {
 		t.Run(raw, func(t *testing.T) {
 			dir := t.TempDir()
 			p := filepath.Join(dir, "state.json")

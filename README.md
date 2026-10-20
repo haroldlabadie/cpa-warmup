@@ -1,6 +1,6 @@
 # CPA 定向预热
 
-将按凭证、按模型族的定时预热放在 CPA 原生插件内运行。插件独立于额度保护，不修改凭证的 `prefix`、`disabled`、`excluded_models` 或保护所有权。作者：Harold Labadie；MIT；当前版本：0.1.0。
+将按凭证、按模型族的定时预热放在 CPA 原生插件内运行。插件独立于额度保护，不修改凭证的 `prefix`、`disabled`、`excluded_models` 或保护所有权。作者：Harold Labadie；MIT；当前版本：0.2.0。
 
 ## 兼容与依赖
 
@@ -12,7 +12,7 @@
 ## 安装
 
 1. 先核对 Release 附件 `checksums.txt` 中的 zip SHA256，再解压发布包并核对包内 `BINARY_SHA256SUMS`，将 `.so` 放入 CPA 的插件目录。不要覆盖其他插件。
-2. 建立独立 0700 数据目录、0600 `secrets.json`，分别填 CPAMP panel 管理密钥与专用预热 Key。两者不是同一种密钥；不要将秘密写入插件 YAML。
+2. 建立独立 0700 数据目录、0600 普通 `secrets.json`（拒绝符号链接与超过 64 KiB），分别填 CPAMP panel 管理密钥与专用预热 Key。两者不是同一种密钥；不要将秘密写入插件 YAML。
 3. 参照 `config.example.yaml` 配置宿主插件。CPA 地址必须是容器内回环地址，CPAMP 使用同一私有网络的地址；容器内不能照搬宿主映射端口。
 4. 首次用 `observe: true` 和独立临时数据目录验证清单、额度、事件与管理页。观察模式不发送生成请求。已有旧守护时先按下文迁移，不能并行运行两个调度器。
 5. 配置每个账号的唯一 prefix。缺失、重复或非法 prefix 时只等待；插件不会自动修正路由。
@@ -23,7 +23,7 @@
 
 CPA 插件菜单中的“定向预热”提供自动预热开关、上海时区每天的小时、三个模型族的模型、全部账号或指定账号。默认每天 05/10/15/20 点，90 分钟执行期限，旧周期截止后 15 秒缓冲。空账号列表代表全部支持的 Codex / Antigravity 凭证。调整计划只影响未来可执行槽位，已经发送的记录保持不变。
 
-页面是公开静态 shell，账号和状态经受宿主管理鉴权的接口读取；管理令牌只留在当前页面内存。状态区区分等待、未决、请求完成、周期确认与激活类型。没有清空历史或强制重发按钮。所有用户数据通过文本节点显示。
+页面是公开静态 shell，账号和状态经受宿主管理鉴权的接口读取；管理令牌只留在当前页面内存。状态区区分等待、未决、请求完成、周期确认、历史退休、世代封存与部分错误。没有清空历史或强制重发按钮。所有用户数据通过文本节点显示。
 
 同源 CPAMC 管理会话存在时，页面只读现有 `cli-proxy-auth` 会话并在内存复用；不写入浏览器存储。没有会话或会话失效时才提供手动管理令牌输入。
 
@@ -46,11 +46,28 @@ CPA 插件菜单中的“定向预热”提供自动预热开关、上海时区�
 
 持久事件必须精确匹配 Key hash、`cpa-quota-guard/2 <UUID>`、凭证文件与 index、provider、请求模型、low、时间、request ID 与已有 trace。查询采用固定时间界限、双游标、完整总数和 coverage 校验；失败、截断、迟到插入造成总数变化均为 unknown。CPAMP v1.14.7 的 scope projection 会漏 UA；attempt 使用经源码和隔离测试验证的 `UUID%` 搜索强制 raw 路径，再本地 exact 校验。版本变化后须重做契约验证。活动查询合并最近开始事件和历史超长请求，按请求开始加非负耗时求完成时间。
 
-真实周期需请求后的新鲜 quota，非零使用量或至少相隔 10 秒、截止差 ≤3 秒的稳定满额样本。移动的满额截止提示不证明激活。Codex 精确请求成功后 180 秒仍没有周期，可记“请求完成，周期未核实”，不会重发同槽。未知、499、5xx、取消、断连、无事件均不重发；只有匹配的明确服务端拒绝才有限重试（最多 3 次，至少 60 秒），403 策略拒绝停止该槽。历史 Codex 未决只有完整旧窗口及新鲜后续真实周期证据才能退休。
+真实周期需请求后的新鲜 quota，非零使用量或至少相隔 10 秒、截止差 ≤3 秒的稳定满额样本。移动的满额截止提示不证明激活。对 Codex 和 Antigravity，精确匹配的成功事件在发送满 180 秒后均可记“请求完成，周期未核实”，不会重发同槽；只有同时取得同 provider、同模型族的新鲜 quota 证据才确认周期和 `activation`。未知、499、5xx、取消、断连、无事件或事件不匹配均不重发；只有匹配的明确服务端拒绝才有限重试（最多 3 次，至少 60 秒），403 策略拒绝停止该槽。
 
 只观察 CPA 的持久历史，不能证明绕过 CPA 在官方客户端的使用。Antigravity 的非流 credits fallback 可能绕过 after-auth，因此预热严格使用流式路径；同 auth 的 401 刷新重试不一定再次执行 hook。
 
-状态绑定 name/provider/index/email/account_id/project_id 摘要。同名换账号或迁移身份无法证明时保留旧记录并停止该账号新发送；不能用清空状态绕过未决。
+状态绑定 name/provider/index/email/account_id/project_id 摘要。同名换账号或迁移身份无法证明时保留旧记录并停止该账号新发送；不能用清空状态绕过未决。运行时不会根据文件名自动补绑 `migration-unproven`，未知身份需使用下文的离线恢复入口。
+
+未决请求按 provider + 模型族隔离。Codex 只接受 `all` 五小时窗口，Antigravity 只接受 `gemini` 或 `third_party`；错误族、过期样本、未来起点、移动的满额截止提示都不能单独作为退休依据。匹配的成功事件优先确认原请求或记 `request_completed`。当旧事件不可读，或仅有不匹配事件时，无论 provider，只要发送满五小时加 45 秒、旧周期已过、当前身份绑定且新鲜完整窗口证明真实后续周期（非零用量或 10～90 秒内两次新鲜、截止差 ≤3 秒的稳定满额），才记 `uncertainty_expired`；事件不匹配本身不否定这一独立的后续周期证据，但会保留 `event-evidence-mismatch` 作为未匹配证据时无法退休的原因。历史记录原样保留。
+
+### 离线身份恢复（0.2.0）
+
+helper 默认 dry-run；apply 必须停止该 worker，取得 `worker.lock`，并携带命令输出的精确状态摘要与唯一操作 ID。它只读写插件状态，不触发生成请求，也不修改凭证。
+
+```sh
+# 1. dry-run：取得 state_sha256 与预计 floor_ms，不写状态
+./cpa-warmup-helper recover-identity request-dry-run.json
+# 2. 核对后以同一 operation_id 和 state_sha256 置 apply:true，再执行
+./cpa-warmup-helper recover-identity request-apply.json
+```
+
+请求 JSON 的字段为 `data_dir`、`state_sha256`、`operation_id`、`account`、`current_identity`、`action`、`operator`、`reason`、`apply`。`account` 使用与 inventory 相同的对象；`current_identity` 由 helper `identity` 子命令计算。
+
+`bind` 仅在所有未决记录已有相同 `identity`，或存在与其目标 AuthID/index 一致的已绑定 attempt gate 时成立；仅有姓名或迁移摘要不够。没有机器证据时使用 `seal-and-recover`：旧未决记录逐字保留，新世代只在晚于所有 `sent_ms + 五小时 + 45 秒` 的未来槽位准入，当前已开始槽位也不补发。缺 `sent_ms`、未来 `sent_ms`、摘要不符、运行中、重复操作 ID 均拒绝。恢复审计写入 `identity_generations` 与 append-only `identity_recovery`。
 
 ## 持久化、升级与迁移
 
@@ -58,7 +75,7 @@ CPA 插件菜单中的“定向预热”提供自动预热开关、上海时区�
 
 持久 `worker.lock` 同时标记目录已经初始化。已经存在该标记却丢失 `state.json` 时拒绝重新初始化；删除状态不能恢复发送。应从有效最新备份恢复并核对未决。
 
-schema 1 结构为 `plugin:"cpa-warmup"`、`migration`、`legacy`、`latest_success`、`attempt_gates`、`identities`。`legacy` 无损保存完整旧 v2 对象与未知字段，槽记录保留 UUID/request_id/trace/event_id/状态；新字段增加 event_hash、目标身份等。`attempt_gates` 独立保存门控证据，不改旧槽语义。
+schema 2 的请求历史仍唯一保存在 `legacy.slots`；内存投影不另写顶层副本。顶层新增 `identity_generations`（封存世代、逐条证据摘要、时间下限）与 `identity_recovery`（追加式恢复审计）；保留 `migration`、`latest_success`、`attempt_gates`、`identities` 及全部未知 legacy 字段。旧 schema 1 在受锁打开时校验并原子升级；未来 schema、损坏结构拒绝。旧二进制不得直接读取 schema 2；导出前若存在世代/恢复审计或 `migration-unproven` 应拒绝无损回滚。
 
 离线迁移工具由运维仓库提供，默认 dry-run，显式 apply 才写入且拒绝已有目标；停止旧调度后才导入最终状态。身份摘要必须由随包 helper 计算：
 
@@ -67,7 +84,7 @@ printf '%s' '{"name":"example.json","provider":"codex","auth_index":"example-ind
 ./cpa-warmup-helper validate-store /path/to/staging/state.json
 ```
 
-helper 身份输出为 `{"identity":"<sha256>"}`；只读校验命令不取得 worker 锁，也不写入状态。生产切换还必须核对来源稳定性、旧未决数量与身份证明。无法证明的旧账号用阻断标记保留，不能擅自把当前同名凭证认作原账号。
+helper 身份输出为 `{"identity":"<sha256>"}`；`validate-store` 同时接受 schema 1/2 且不取锁、不写状态，输出 `schema`、槽组、身份、世代与恢复条数。`recover-identity` 默认 dry-run，apply 需 `state_sha256` 完全匹配；dry-run 与 apply 共用同一校验计划。生产切换还必须核对来源稳定性、旧未决数量与身份证明。无法证明的旧账号用阻断标记保留，不能擅自把当前同名凭证认作原账号。
 
 回滚先 quiesce 并确认无发送在途，将**最新** `legacy` 槽与未决导出回旧 v2，而不是恢复迁移前快照。新 attempt 沿用旧 UA 与持久事件格式。额度保护所有权由它自己的迁移工具校验。无法无损回灌时保持 warmup 关闭，保留保护与状态，不冒险重发。
 
@@ -83,6 +100,6 @@ CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -o cpa-warmup.so .
 CGO_ENABLED=1 go build -trimpath -o cpa-warmup-helper .
 ```
 
-CI 使用 Ubuntu 22.04 构建兼容 glibc 的 Linux amd64 产物，上传 `cpa-warmup_0.1.0_linux_amd64.zip` 与 `checksums.txt`，不自动创建 GitHub Release。隔离验收必须使用部署镜像、假凭证、假 Key、假上游与 CPAMP event adapter；不能耗尽真实额度或写生产监控库。测试时可以把业务槽位设为当前上海小时来驱动真实 worker，无隐藏生成接口。
+CI 使用 Ubuntu 22.04 构建兼容 glibc 的 Linux amd64 产物，上传 `cpa-warmup_0.2.0_linux_amd64.zip` 与 `checksums.txt`，不自动创建 GitHub Release。隔离验收必须使用部署镜像、假凭证、假 Key、假上游与 CPAMP event adapter；不能耗尽真实额度或写生产监控库。测试时可以把业务槽位设为当前上海小时来驱动真实 worker，无隐藏生成接口。
 
 ABI 声明与管理 envelope 参考 `key-model-access` 的 MIT 实现；来源与许可证见 `THIRD_PARTY_NOTICES.md`。本插件不修改或重新发布现有权限插件。

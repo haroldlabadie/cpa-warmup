@@ -26,11 +26,11 @@ jobs:
           cd dist
           rm -f cpa-warmup.h
           sha256sum cpa-warmup.so cpa-warmup-helper > BINARY_SHA256SUMS
-          zip cpa-warmup_0.1.0_linux_amd64.zip cpa-warmup.so cpa-warmup-helper BINARY_SHA256SUMS README.md LICENSE THIRD_PARTY_NOTICES.md *.example.*
-          sha256sum cpa-warmup_0.1.0_linux_amd64.zip > checksums.txt
+          zip cpa-warmup_0.2.0_linux_amd64.zip cpa-warmup.so cpa-warmup-helper BINARY_SHA256SUMS README.md LICENSE THIRD_PARTY_NOTICES.md *.example.*
+          sha256sum cpa-warmup_0.2.0_linux_amd64.zip > checksums.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: cpa-warmup_0.1.0_linux_amd64
+          name: cpa-warmup_0.2.0_linux_amd64
           path: |
             dist/*.zip
             dist/checksums.txt

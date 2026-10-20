@@ -106,11 +106,27 @@ func validateURL(raw string, loopback bool) error {
 	}
 	h := u.Hostname()
 	ip := net.ParseIP(h)
-	if loopback && h != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return errors.New("CPA URL must be loopback")
+	if loopback {
+		if h != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return errors.New("CPA URL must be loopback")
+		}
+		return nil
 	}
-	if !loopback && ip != nil && !ip.IsLoopback() && !ip.IsPrivate() {
-		return errors.New("CPAMP must be private network")
+	if ip != nil {
+		if !ip.IsLoopback() && !ip.IsPrivate() {
+			return errors.New("CPAMP must be private network")
+		}
+		return nil
+	}
+	// Compose service names are single-label DNS names. Arbitrary external
+	// domains (including lookalikes) are rejected instead of trusted by DNS.
+	if len(h) > 63 || strings.Contains(h, ".") || strings.HasPrefix(h, "-") || strings.HasSuffix(h, "-") {
+		return errors.New("CPAMP must use private IP or internal service name")
+	}
+	for _, r := range h {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+			return errors.New("CPAMP must use private IP or internal service name")
+		}
 	}
 	return nil
 }

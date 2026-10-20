@@ -12,6 +12,9 @@ func confirmationFixture(t *testing.T, failed bool, status *int) (*Engine, Accou
 	r := Record{"status": "sent", "sent_ms": now - 200000, "attempt_token": "uuid", "requested_model": "prefix/model", "identity": a.identity(), "scope": "all", "trace": "codex-index-request"}
 	v := Event{Hash: "hash", RequestID: "request", Timestamp: now - 199999, RequestedModel: "prefix/model", Model: "model", UA: "cpa-quota-guard/2 uuid", Index: a.Index, File: a.Name, Provider: a.Provider, KeyHash: hash("prewarm-test"), Reasoning: "low", Failed: failed, Status: status}
 	e := scheduleEngine(t)
+	// Fixtures model production's explicit account binding by default; tests
+	// that exercise migration blocking delete or replace this binding.
+	e.store.state.Identities[a.Name] = a.identity()
 	e.api = eventsAPI(t, func(q map[string]any) any { return eventPage([]Event{v}, 1, false, 0, 0) })
 	s := &Sample{Observed: now, Windows: []Window{{Kind: "five_hour", Scope: "all", Remaining: 99, EndMS: v.Timestamp + fiveHour, Duration: fiveHour}, {Kind: "weekly", Scope: "all", Remaining: 80, EndMS: now + week, Duration: week}}}
 	return e, a, r, s, now
@@ -99,11 +102,16 @@ func TestAntigravityRequestOnlyNeverClaimsActivation(t *testing.T) {
 	r["scope"] = "gemini"
 	v := Event{Hash: "hash", RequestID: "request", Timestamp: now - 199999, RequestedModel: "prefix/model", Model: "model", UA: "cpa-quota-guard/2 uuid", Index: a.Index, File: a.Name, Provider: a.Provider, KeyHash: hash("prewarm-test"), Reasoning: "low"}
 	r["trace"] = "antigravity-index-request"
+	// The fixture changes provider and rebuilds the event; bind the final
+	// identity once so this test checks activation, not fixture drift.
+	e.store.state.Identities[a.Name] = a.identity()
 	e.api = eventsAPI(t, func(q map[string]any) any { return eventPage([]Event{v}, 1, false, 0, 0) })
 	if err := e.confirm(a, r, nil, now); err != nil {
 		t.Fatal(err)
 	}
-	if str(r, "status") != "unconfirmed" {
-		t.Fatalf("AG request only falsely completed %#v", r)
+	// A proved request may close as request_completed on any provider, but it
+	// must never claim a cycle or activation without quota evidence.
+	if str(r, "status") != "request_completed" || str(r, "activation") != "" || r["cycle_start_ms"] != nil || r["cycle_end_ms"] != nil {
+		t.Fatalf("AG request only falsely completed a cycle %#v", r)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 )
 
 const managementBase = "/v0/management/plugins/cpa-warmup"
@@ -16,7 +15,7 @@ var page []byte
 //go:embed web/settings.js
 var pageScript []byte
 
-func nowMS() int64 { return time.Now().UnixMilli() }
+func nowMS() int64 { return nowMillis() }
 func management(raw []byte) ([]byte, error) {
 	var req managementRequest
 	if json.Unmarshal(raw, &req) != nil {

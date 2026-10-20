@@ -141,8 +141,16 @@ func number(v any) (float64, error) {
 	}
 	return 0, errors.New("non numeric quota")
 }
-func obj(v any) map[string]any { m, _ := v.(map[string]any); return m }
-func text(v any) string        { s, _ := v.(string); return s }
+func obj(v any) map[string]any {
+	switch m := v.(type) {
+	case map[string]any:
+		return m
+	case Record:
+		return map[string]any(m)
+	}
+	return nil
+}
+func text(v any) string { s, _ := v.(string); return s }
 func parseCodex(p map[string]any) ([]Window, error) {
 	primary := obj(p["rate_limit"])
 	if primary == nil {

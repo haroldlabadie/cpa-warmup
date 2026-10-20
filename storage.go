@@ -27,15 +27,21 @@ type Gate struct {
 	RequestID      string `json:"request_id,omitempty"`
 	AfterAuth      bool   `json:"after_auth"`
 }
+
+// State has one persistent source for request history: Legacy["slots"]. Slots
+// is an in-memory projection only. Schema 2 adds identity generations and
+// recovery audit; unknown legacy fields are retained byte-for-byte.
 type State struct {
-	Schema        int                        `json:"schema"`
-	Plugin        string                     `json:"plugin"`
-	Migration     json.RawMessage            `json:"migration,omitempty"`
-	Legacy        map[string]json.RawMessage `json:"legacy"`
-	LatestSuccess map[string]int64           `json:"latest_success"`
-	AttemptGates  map[string]Gate            `json:"attempt_gates"`
-	Identities    map[string]string          `json:"identities"`
-	Slots         Slots                      `json:"-"`
+	Schema              int                        `json:"schema"`
+	Plugin              string                     `json:"plugin"`
+	Migration           json.RawMessage            `json:"migration,omitempty"`
+	Legacy              map[string]json.RawMessage `json:"legacy"`
+	LatestSuccess       map[string]int64           `json:"latest_success"`
+	AttemptGates        map[string]Gate            `json:"attempt_gates"`
+	Identities          map[string]string          `json:"identities"`
+	IdentityGenerations map[string]*Generation     `json:"identity_generations,omitempty"`
+	IdentityRecovery    []IdentityRecovery         `json:"identity_recovery,omitempty"`
+	Slots               Slots                      `json:"-"`
 }
 type Store struct {
 	mu    sync.Mutex
@@ -153,7 +159,9 @@ func openStore(dir string) (*Store, error) {
 		return nil, errors.New("initialized state is missing; automatic actions stopped")
 	}
 	if os.IsNotExist(e) {
-		s.state = State{Schema: 1, Plugin: pluginID, Legacy: map[string]json.RawMessage{"version": json.RawMessage(`2`), "accounts": json.RawMessage(`{}`), "slots": json.RawMessage(`{}`)}}
+		s.state = State{Schema: stateSchema, Plugin: pluginID, Legacy: map[string]json.RawMessage{
+			"version": json.RawMessage(`2`), "accounts": json.RawMessage(`{}`), "slots": json.RawMessage(`{}`),
+		}, Slots: Slots{}}
 	} else if e != nil {
 		s.close()
 		return nil, e
@@ -161,15 +169,35 @@ func openStore(dir string) (*Store, error) {
 		s.close()
 		return nil, errors.New("state decode failed; automatic actions stopped")
 	}
-	if s.state.Schema != 1 || s.state.Plugin != pluginID || s.state.Legacy == nil {
+	if (s.state.Schema != 1 && s.state.Schema != stateSchema) || s.state.Plugin != pluginID || s.state.Legacy == nil {
 		s.close()
 		return nil, errors.New("unsupported state schema")
+	}
+	if s.state.Schema == 1 && (s.state.IdentityGenerations != nil || s.state.IdentityRecovery != nil) {
+		s.close()
+		return nil, errors.New("schema 1 carries schema 2 state")
+	}
+	if s.state.Legacy["slots"] == nil {
+		s.close()
+		return nil, errors.New("missing legacy slots")
 	}
 	if e = decodePreserving(s.state.Legacy["slots"], &s.state.Slots); e != nil || s.state.Slots == nil {
 		s.close()
 		return nil, errors.New("invalid legacy slots")
 	}
 	if e = validateSlots(s.state.Slots); e != nil {
+		s.close()
+		return nil, e
+	}
+	if e = validateGenerations(s.state.IdentityGenerations, s.state.Slots); e != nil {
+		s.close()
+		return nil, e
+	}
+	if e = validateRecovery(s.state.IdentityRecovery); e != nil {
+		s.close()
+		return nil, e
+	}
+	if e = validateIdentityLinks(&s.state); e != nil {
 		s.close()
 		return nil, e
 	}
@@ -182,6 +210,12 @@ func openStore(dir string) (*Store, error) {
 	if s.state.Identities == nil {
 		s.state.Identities = map[string]string{}
 	}
+	if s.state.IdentityGenerations == nil {
+		s.state.IdentityGenerations = map[string]*Generation{}
+	}
+	if s.state.IdentityRecovery == nil {
+		s.state.IdentityRecovery = []IdentityRecovery{}
+	}
 	if e = s.saveLocked(); e != nil {
 		s.close()
 		return nil, e
@@ -189,11 +223,21 @@ func openStore(dir string) (*Store, error) {
 	return s, nil
 }
 func (s *Store) saveLocked() error {
+	if s.state.Slots == nil {
+		return errors.New("missing slots projection")
+	}
 	b, e := json.Marshal(s.state.Slots)
 	if e != nil {
 		return e
 	}
+	if s.state.Legacy == nil {
+		s.state.Legacy = map[string]json.RawMessage{}
+	}
+	// Legacy.slots is the only persisted request history. Schema upgrades do
+	// not create a second top-level copy that could diverge.
 	s.state.Legacy["slots"] = b
+	s.state.Schema = stateSchema
+	s.state.Plugin = pluginID
 	return atomicJSON(s.path, s.state)
 }
 func (s *Store) close() {
@@ -259,32 +303,46 @@ func validateSlots(slots Slots) error {
 	}
 	return nil
 }
+
 func helper(args []string) int {
-	if len(args) == 2 && args[0] == "validate-store" {
+	switch {
+	case len(args) == 2 && args[0] == "validate-store":
 		b, e := readLimited(args[1], 16<<20)
+		if e != nil {
+			return 1
+		}
 		var s State
-		if e != nil || strict(b, &s) != nil || s.Schema != 1 || s.Plugin != pluginID || s.Legacy == nil {
+		if strict(b, &s) != nil || (s.Schema != 1 && s.Schema != stateSchema) || s.Plugin != pluginID || s.Legacy == nil || s.Legacy["slots"] == nil || (s.Schema == 1 && (s.IdentityGenerations != nil || s.IdentityRecovery != nil)) {
 			return 1
 		}
 		var slots Slots
 		if decodePreserving(s.Legacy["slots"], &slots) != nil || validateSlots(slots) != nil {
 			return 1
 		}
-		json.NewEncoder(os.Stdout).Encode(map[string]any{"valid": true, "slot_groups": len(slots), "identities": len(s.Identities)})
+		if validateGenerations(s.IdentityGenerations, slots) != nil || validateRecovery(s.IdentityRecovery) != nil {
+			return 1
+		}
+		s.Slots = slots
+		if validateIdentityLinks(&s) != nil {
+			return 1
+		}
+		json.NewEncoder(os.Stdout).Encode(map[string]any{"valid": true, "schema": s.Schema, "slot_groups": len(slots), "identities": len(s.Identities), "generations": len(s.IdentityGenerations), "recovery": len(s.IdentityRecovery)})
 		return 0
-	}
-	if len(args) != 1 || args[0] != "identity" {
-		fmt.Fprintln(os.Stderr, "usage: cpa-warmup-helper identity < metadata.json")
+	case len(args) == 2 && args[0] == "recover-identity":
+		return recoverIdentityCommand(args[1])
+	case len(args) == 1 && args[0] == "identity":
+		b, e := io.ReadAll(io.LimitReader(os.Stdin, 65537))
+		if e != nil || len(b) > 65536 {
+			return 1
+		}
+		var a Account
+		if strict(b, &a) != nil {
+			return 1
+		}
+		json.NewEncoder(os.Stdout).Encode(map[string]string{"identity": a.identity()})
+		return 0
+	default:
+		fmt.Fprintln(os.Stderr, "usage: cpa-warmup-helper identity < metadata.json | validate-store < state.json | recover-identity < request.json")
 		return 2
 	}
-	b, e := io.ReadAll(io.LimitReader(os.Stdin, 65537))
-	if e != nil || len(b) > 65536 {
-		return 1
-	}
-	var a Account
-	if strict(b, &a) != nil {
-		return 1
-	}
-	json.NewEncoder(os.Stdout).Encode(map[string]string{"identity": a.identity()})
-	return 0
 }
