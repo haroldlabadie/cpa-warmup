@@ -9,9 +9,43 @@ if(typeof module!=="undefined")module.exports={parseHours,modelValue,buildSettin
 if(typeof document!=="undefined"){
  const $=id=>document.getElementById(id),base="/v0/management/plugins/cpa-warmup";let revision="",settings=null;
  async function call(path,method="GET",body){const headers={Authorization:"Bearer "+$("token").value.trim()};if(body!==undefined){headers["Content-Type"]="application/json";headers["If-Match"]=revision;}const response=await fetch(base+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body),cache:"no-store"});const data=await response.json();if(!response.ok)throw Error(data.error||"HTTP "+response.status);return{data,etag:response.headers.get("ETag")};}
- function renderStatus(status){$("version").textContent=status.version;$("health").textContent=(status.observe?"观察模式，不发送请求":status.quiesced?"已停止":status.worker_alive?"运行中":"已停用")+"；最近检查："+(status.last_tick_ms?new Date(status.last_tick_ms).toLocaleString():"尚未检查");$("next").textContent="下次计划："+(status.next_slot||"暂无");$("error").textContent=status.last_error||"";const tbody=$("rows");tbody.replaceChildren();for(const [slot,records]of Object.entries(status.slots||{}).sort((a,b)=>b[0].localeCompare(a[0]))){for(const [name,record]of Object.entries(records)){const row=document.createElement("tr");for(const value of [slot,name+(record.scope?" / "+record.scope:""),labels[record.status]||record.status,reasonText(record.last_reason),record.attempts||0,record.cycle_end_ms?new Date(record.cycle_end_ms).toLocaleString():"—"]){const cell=document.createElement("td");cell.textContent=String(value);row.append(cell);}tbody.append(row);}}}
- async function load(){try{const [config,status]=await Promise.all([call("/settings"),call("/status")]);settings=config.data.settings;revision=config.etag||'"'+config.data.revision+'"';$("enabled").checked=settings.enabled;$("hours").value=settings.slot_hours.join(",");for(const scope of ["codex","gemini","third_party"])$(scope).value=settings.models[scope];$("allAccounts").checked=settings.accounts.length===0;const names=new Set(settings.accounts);for(const name of status.data.accounts||[])names.add(name);const select=$("accounts");select.replaceChildren();for(const name of [...names].sort()){const option=document.createElement("option");option.value=name;option.textContent=name;option.selected=settings.accounts.includes(name);select.append(option);}select.disabled=$("allAccounts").checked;$("form").disabled=false;renderStatus(status.data);$("message").textContent="已加载";}catch(error){$("message").textContent=error.message;$("authLabel").hidden=false;}}
- $("allAccounts").onchange=()=>{$("accounts").disabled=$("allAccounts").checked;};$("load").onclick=load;$("save").onclick=async()=>{if(!settings)return;try{const body=buildSettings(settings,{enabled:$("enabled").checked,hours:$("hours").value,codex:$("codex").value,gemini:$("gemini").value,third_party:$("third_party").value,allAccounts:$("allAccounts").checked,accounts:Array.from($("accounts").selectedOptions,x=>x.value)});const result=await call("/settings","PUT",body);settings=result.data.settings;revision=result.etag||'"'+result.data.revision+'"';$("message").textContent="已保存；现有槽位与未决记录保持不变";}catch(error){$("message").textContent=error.message;}};
+ function setText(id,text){$(id).textContent=text==null?"":String(text);}
+ function setStatusTone(healthy){$("statusDot").className="dot"+(healthy?"":" danger");}
+ function renderStatus(status){
+  setText("version",status.version?"v"+status.version:"");
+  const healthy=status.worker_alive&&!status.quiesced&&!status.last_error&&!status.observe;
+  setStatusTone(healthy);
+  setText("statusLabel",status.observe?"观察模式，不发送请求":status.quiesced?"已停止":status.worker_alive?"自动预热运行中":"已停用");
+  setText("modeLabel",status.observe?"Observe · 观察模式":status.quiesced?"已停止":"Warmup · 自动预热");
+  setText("lastCheck",status.last_tick_ms?new Date(status.last_tick_ms).toLocaleString():"尚未检查");
+  setText("next",status.next_slot?(new Date(status.next_slot)).toLocaleString():"暂无计划");
+  setText("error",status.last_error||"");
+  const tbody=$("rows");tbody.replaceChildren();
+  const rows=[];for(const [slot,records]of Object.entries(status.slots||{}).sort((a,b)=>b[0].localeCompare(a[0]))){for(const [name,record]of Object.entries(records))rows.push({slot,name,record});}
+  if(!rows.length){const row=document.createElement("tr"),cell=document.createElement("td");cell.className="empty";cell.colSpan=6;cell.textContent="暂无槽位记录。保存计划后，调度器会在下一个计划时点开始检查。";row.append(cell);tbody.append(row);return;}
+  for(const {slot,name,record} of rows){
+   const row=document.createElement("tr");
+   const tableLabels=Array.from(tbody.closest("table").querySelectorAll("thead th"),th=>th.textContent.trim());for(const [index,value] of [slot,name+(record.scope?" / "+record.scope:""),labels[record.status]||record.status,reasonText(record.last_reason),record.attempts||0,record.cycle_end_ms?new Date(record.cycle_end_ms).toLocaleString():"—"].entries()){const cell=document.createElement("td");cell.textContent=String(value);cell.setAttribute("data-label",tableLabels[index]||"");row.append(cell);}
+   tbody.append(row);
+  }
+ }
+ async function load(){
+  try{
+   $("message").textContent="正在读取计划与运行状态…";$("message").className="message";
+   const [config,status]=await Promise.all([call("/settings"),call("/status")]);
+   settings=config.data.settings;revision=config.etag||'"'+config.data.revision+'"';
+   $("enabled").checked=settings.enabled;$("hours").value=settings.slot_hours.join(",");
+   for(const scope of ["codex","gemini","third_party"])$(scope).value=settings.models[scope];
+   $("allAccounts").checked=settings.accounts.length===0;
+   const names=new Set(settings.accounts);for(const name of status.data.accounts||[])names.add(name);
+   const select=$("accounts");select.replaceChildren();
+   for(const name of [...names].sort()){const option=document.createElement("option");option.value=name;option.textContent=name;option.selected=settings.accounts.includes(name);select.append(option);}
+   select.disabled=$("allAccounts").checked;$("form").disabled=false;
+   setText("hoursSummary",settings.slot_hours.map(x=>String(x).padStart(2,"0")+":00").join(" / "));
+   setText("accountSummary",settings.accounts.length===0?"全部支持的账号":settings.accounts.length+" 个指定账号");
+   renderStatus(status.data);$("message").textContent="已加载最新计划";$("message").className="message success";
+  }catch(error){$("message").textContent=error.message;$("message").className="message error";$("authLabel").hidden=false;}
+ }
  function readSession(){try{let raw=localStorage.getItem("cli-proxy-auth");if(!raw)return "";if(raw.startsWith("enc::v1::")){const bytes=Uint8Array.from(atob(raw.slice(9)),c=>c.charCodeAt(0));const salt=new TextEncoder().encode(`cli-proxy-api-webui::secure-storage|${window.location.host}|${navigator.userAgent}`);raw=new TextDecoder().decode(bytes.map((b,i)=>b^salt[i%salt.length]));}const auth=JSON.parse(raw),state=auth.state||auth;return typeof state.managementKey==="string"?state.managementKey:"";}catch(_){return "";}}
  const session=readSession();if(session){$("token").value=session;$("authLabel").hidden=true;load();}
 }
