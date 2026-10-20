@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"net/http"
@@ -38,12 +39,19 @@ func management(raw []byte) ([]byte, error) {
 		e.mu.Unlock()
 		return managementJSON(200, map[string]any{"settings": s, "revision": r}, http.Header{"ETag": []string{revisionETag(r)}})
 	}
+	if req.Method == "GET" && p == managementBase+"/catalog" {
+		catalog, err := modelCatalog(context.Background(), e.api)
+		if err != nil {
+			return managementJSON(503, map[string]string{"error": "model catalog unavailable"}, nil)
+		}
+		return managementJSON(200, map[string]any{"models": catalog}, nil)
+	}
 	if req.Method == "PUT" && p == managementBase+"/settings" {
 		if len(req.Body) > 65536 {
 			return managementJSON(413, map[string]string{"error": "settings too large"}, nil)
 		}
-		var s Settings
-		if strict(req.Body, &s) != nil || s.validate() != nil {
+		s, err := decodeSettingsForWrite(req.Body)
+		if err != nil || s.validate() != nil || s.Version != 2 {
 			return managementJSON(422, map[string]string{"error": "invalid or unknown settings"}, nil)
 		}
 		e.mu.Lock()

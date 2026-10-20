@@ -141,12 +141,13 @@ func TestReviewSealedHistoryImmutableAcrossOpenTickAndFutureSlot(t *testing.T) {
 	eng := &Engine{
 		store: st, api: newAPI(Bootstrap{CPAMPURL: cpamp.URL}, Secrets{ManagementKey: "management-test", PrewarmKey: "prewarm-test"}),
 		cfg: Bootstrap{Enabled: true, Observe: true}, ctx: ctx, cancel: cancel,
-		settings:     Settings{Version: 1, Enabled: true, SlotHours: []int{time.UnixMilli(now).In(tz).Hour()}, GraceSeconds: 5400, CheckSeconds: 20, Models: defaults().Models},
+		settings:     defaults(),
 		observations: map[string]any{}, partialErrors: map[string]string{},
 	}
 	// The just-created generation only admits strictly future scheduled slots.
 	// This call may report the floor reason, but it must not mutate the sealed
 	// record, which is the invariant under test.
+	eng.settings.SlotHours = []int{time.UnixMilli(now).In(tz).Add(-time.Hour).Hour()}
 	if err := eng.schedule(a, "all", nil, []Account{a}, eng.settings, now); err == nil {
 		t.Fatal("unexpected admission in an already started slot")
 	}
@@ -166,6 +167,7 @@ func TestReviewSealedHistoryImmutableAcrossOpenTickAndFutureSlot(t *testing.T) {
 	future := time.UnixMilli(now).In(tz).Add(24 * time.Hour)
 	futureHour := future.Hour()
 	eng.settings.SlotHours = []int{futureHour}
+	eng.settings.Targets = []Target{{Scope: "codex", Accounts: []string{a.Name}, Model: "gpt-test"}}
 	futureNow := time.Date(future.Year(), future.Month(), future.Day(), futureHour, 1, 0, 0, tz).UnixMilli()
 	nowMillis = func() int64 { return futureNow }
 	inventoryHost(t, []map[string]any{fileInventoryAccount()}, map[string]map[string]any{

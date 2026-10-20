@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -502,6 +503,55 @@ func (a *API) send(ctx context.Context, model, uuid string) (string, error) {
 		return trace, errors.New("stream uncertain")
 	}
 	return trace, nil
+}
+
+// modelCatalog reads the public CPA model list using the dedicated prewarm
+// key. Only public IDs and owners are returned; the key never leaves the
+// plugin process.
+func modelCatalog(ctx context.Context, a *API) ([]map[string]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(a.cfg.CPAURL, "/")+"/v1/models", nil)
+	if err != nil {
+		return nil, errors.New("catalog request setup failed")
+	}
+	req.Header.Set("Authorization", "Bearer "+a.secrets.PrewarmKey)
+	req.Header.Set("User-Agent", "cpa-warmup/"+pluginVersion)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, errors.New("catalog transport failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("catalog HTTP %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20+1))
+	if err != nil || len(raw) > 2<<20 {
+		return nil, errors.New("catalog response too large")
+	}
+	var body struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return nil, errors.New("catalog JSON invalid")
+	}
+	seen := map[string]bool{}
+	out := []map[string]string{}
+	for _, item := range body.Data {
+		slash := strings.LastIndex(item.ID, "/")
+		name := item.ID
+		if slash >= 0 {
+			name = item.ID[slash+1:]
+		}
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, map[string]string{"name": name, "provider": item.OwnedBy})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["name"] < out[j]["name"] })
+	return out, nil
 }
 
 func groupSlug(s string) string {

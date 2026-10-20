@@ -1,6 +1,6 @@
 # CPA 定向预热
 
-将按凭证、按模型族的定时预热放在 CPA 原生插件内运行。插件独立于额度保护，不修改凭证的 `prefix`、`disabled`、`excluded_models` 或保护所有权。作者：Harold Labadie；MIT；当前版本：0.2.0。
+将按凭证、按模型族的定时预热放在 CPA 原生插件内运行。插件独立于额度保护，不修改凭证的 `prefix`、`disabled`、`excluded_models` 或保护所有权。作者：Harold Labadie；MIT；当前版本：0.3.0。
 
 ## 兼容与依赖
 
@@ -21,14 +21,13 @@
 
 ## 管理页面
 
-CPA 插件菜单中的“定向预热”提供自动预热开关、上海时区每天的小时、三个模型族的模型、全部账号或指定账号。默认每天 05/10/15/20 点，90 分钟执行期限，旧周期截止后 15 秒缓冲。空账号列表代表全部支持的 Codex / Antigravity 凭证。调整计划只影响未来可执行槽位，已经发送的记录保持不变。
+CPA 插件菜单中的“定向预热”按渠道分别配置：先选 Codex、Gemini、Claude / GPT，再为该渠道选择账号（空列表代表该渠道全部账号）和模型。模型选项来自 CPA `/v1/models` 目录，保存时只接受不含 prefix、斜线或空格的公开模型名。默认每天 05/10/15/20 点，90 分钟执行期限，旧周期截止后 15 秒缓冲。调整计划只影响未来可执行槽位，已经发送的记录保持不变。
 
 页面是公开静态 shell，账号和状态经受宿主管理鉴权的接口读取。登录门面会自动复用同源 CPAMP 会话；需要手动输入时默认勾选“在此浏览器记住管理令牌”，验证成功后保存到当前站点的 localStorage，后续页面直接进入设置。设置页本身不显示管理令牌或连接管理控件，可用页脚“退出管理会话”清除保存值。状态区区分等待、未决、请求完成、周期确认、历史退休、世代封存与部分错误。没有清空历史或强制重发按钮。所有用户数据通过文本节点显示。
 
-同源 CPAMP 管理会话存在时，页面读取现有 `cli-proxy-auth` 会话并自动复用；兼容 `enc::v1::` 与 `enc::v2::` 浏览器存储格式。没有可用会话或会话失效时才显示手动管理令牌输入。手动令牌只写入独立键 `cpa_warmup_mgmt_key`，不写入页面 URL、插件设置、日志或公开页面；退出管理会话会同时清除本地保存值。
-
 | 接口 | 作用 |
 | --- | --- |
+| `GET /v0/management/plugins/cpa-warmup/catalog` | 通过专用预热 Key 读取可用模型名与 provider |
 | `GET /v0/management/plugins/cpa-warmup/status` | 版本、工作线程、错误、下次计划与槽位 |
 | `GET /v0/management/plugins/cpa-warmup/settings` | 业务设置与 ETag |
 | `PUT /v0/management/plugins/cpa-warmup/settings` | 严格 JSON；必须带当前 `If-Match`，旧页面返回 412 |
@@ -54,7 +53,7 @@ CPA 插件菜单中的“定向预热”提供自动预热开关、上海时区�
 
 未决请求按 provider + 模型族隔离。Codex 只接受 `all` 五小时窗口，Antigravity 只接受 `gemini` 或 `third_party`；错误族、过期样本、未来起点、移动的满额截止提示都不能单独作为退休依据。匹配的成功事件优先确认原请求或记 `request_completed`。当旧事件不可读，或仅有不匹配事件时，无论 provider，只要发送满五小时加 45 秒、旧周期已过、当前身份绑定且新鲜完整窗口证明真实后续周期（非零用量或 10～90 秒内两次新鲜、截止差 ≤3 秒的稳定满额），才记 `uncertainty_expired`；事件不匹配本身不否定这一独立的后续周期证据，但会保留 `event-evidence-mismatch` 作为未匹配证据时无法退休的原因。历史记录原样保留。
 
-### 离线身份恢复（0.2.0）
+### 离线身份恢复（0.3.0）
 
 helper 默认 dry-run；apply 必须停止该 worker，取得 `worker.lock`，并携带命令输出的精确状态摘要与唯一操作 ID。它只读写插件状态，不触发生成请求，也不修改凭证。
 
@@ -100,6 +99,6 @@ CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -o cpa-warmup.so .
 CGO_ENABLED=1 go build -trimpath -o cpa-warmup-helper .
 ```
 
-CI 使用 Ubuntu 22.04 构建兼容 glibc 的 Linux amd64 产物，上传 `cpa-warmup_0.2.0_linux_amd64.zip` 与 `checksums.txt`，不自动创建 GitHub Release。隔离验收必须使用部署镜像、假凭证、假 Key、假上游与 CPAMP event adapter；不能耗尽真实额度或写生产监控库。测试时可以把业务槽位设为当前上海小时来驱动真实 worker，无隐藏生成接口。
+CI 使用 Ubuntu 22.04 构建兼容 glibc 的 Linux amd64 产物，上传 `cpa-warmup_0.3.0_linux_amd64.zip` 与 `checksums.txt`，不自动创建 GitHub Release。隔离验收必须使用部署镜像、假凭证、假 Key、假上游与 CPAMP event adapter；不能耗尽真实额度或写生产监控库。测试时可以把业务槽位设为当前上海小时来驱动真实 worker，无隐藏生成接口。
 
 ABI 声明与管理 envelope 参考 `key-model-access` 的 MIT 实现；来源与许可证见 `THIRD_PARTY_NOTICES.md`。本插件不修改或重新发布现有权限插件。

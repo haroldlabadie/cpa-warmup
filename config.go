@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"gopkg.in/yaml.v3"
 	"io"
@@ -24,13 +25,20 @@ type Bootstrap struct {
 	SettingsFile string    `yaml:"settings_file"`
 }
 type Settings struct {
-	Version      int               `json:"version"`
-	Enabled      bool              `json:"enabled"`
-	SlotHours    []int             `json:"slot_hours"`
-	GraceSeconds int               `json:"slot_grace_seconds"`
-	CheckSeconds int               `json:"check_seconds"`
-	Accounts     []string          `json:"accounts"`
-	Models       map[string]string `json:"models"`
+	Version      int      `json:"version"`
+	Enabled      bool     `json:"enabled"`
+	SlotHours    []int    `json:"slot_hours"`
+	GraceSeconds int      `json:"slot_grace_seconds"`
+	CheckSeconds int      `json:"check_seconds"`
+	Targets      []Target `json:"targets"`
+}
+
+// Target keeps each warmup channel independent. Codex has one provider-wide
+// window, while Antigravity exposes two independently metered model families.
+type Target struct {
+	Scope    string   `json:"scope"`
+	Accounts []string `json:"accounts"`
+	Model    string   `json:"model"`
 }
 type Secrets struct {
 	ManagementKey string `json:"management_key"`
@@ -38,10 +46,14 @@ type Secrets struct {
 }
 
 func defaults() Settings {
-	return Settings{1, true, []int{5, 10, 15, 20}, 5400, 20, []string{}, map[string]string{"codex": "gpt-6-luna", "gemini": "gemini-3.8-flash-high", "third_party": "claude-sonnet-4-6"}}
+	return Settings{Version: 2, Enabled: true, SlotHours: []int{5, 10, 15, 20}, GraceSeconds: 5400, CheckSeconds: 20, Targets: []Target{
+		{Scope: "codex", Accounts: []string{}, Model: "gpt-6-luna"},
+		{Scope: "gemini", Accounts: []string{}, Model: "gemini-3.8-flash-high"},
+		{Scope: "third_party", Accounts: []string{}, Model: "claude-sonnet-4-6"},
+	}}
 }
 func (s Settings) validate() error {
-	if s.Version != 1 || s.GraceSeconds != 5400 || s.CheckSeconds < 5 || s.CheckSeconds > 300 || len(s.SlotHours) == 0 || len(s.SlotHours) > 24 {
+	if s.Version != 2 || s.GraceSeconds != 5400 || s.CheckSeconds < 5 || s.CheckSeconds > 300 || len(s.SlotHours) == 0 || len(s.SlotHours) > 24 {
 		return errors.New("invalid schedule")
 	}
 	seen := map[int]bool{}
@@ -53,23 +65,87 @@ func (s Settings) validate() error {
 		seen[h] = true
 		prev = h
 	}
-	if len(s.Models) != 3 {
-		return errors.New("three model scopes required")
+	if len(s.Targets) != 3 {
+		return errors.New("three target scopes required")
 	}
-	for _, scope := range []string{"codex", "gemini", "third_party"} {
-		m := s.Models[scope]
-		if m == "" || strings.ContainsAny(m, "/\r\n\t ") || len(m) > 128 {
+	seenScopes := map[string]bool{}
+	for _, t := range s.Targets {
+		if (t.Scope != "codex" && t.Scope != "gemini" && t.Scope != "third_party") || seenScopes[t.Scope] {
+			return errors.New("invalid or duplicate target scope")
+		}
+		seenScopes[t.Scope] = true
+		if t.Model == "" || strings.ContainsAny(t.Model, "/\r\n\t ") || len(t.Model) > 128 {
 			return errors.New("invalid model")
 		}
-	}
-	names := map[string]bool{}
-	for _, n := range s.Accounts {
-		if n == "" || filepath.Base(n) != n || strings.ContainsAny(n, "\\/\r\n") || names[n] {
-			return errors.New("invalid account allowlist")
+		names := map[string]bool{}
+		for _, n := range t.Accounts {
+			if n == "" || filepath.Base(n) != n || strings.ContainsAny(n, "\\/\r\n") || names[n] {
+				return errors.New("invalid account allowlist")
+			}
+			names[n] = true
 		}
-		names[n] = true
 	}
 	return nil
+}
+
+// legacySettings accepts version 1 files so an upgrade never drops a live
+// plan. A v1 account list applies to every scope, matching its former global
+// semantics; an empty list keeps the former "all supported accounts" meaning.
+type legacySettings struct {
+	Version      int               `json:"version"`
+	Enabled      bool              `json:"enabled"`
+	SlotHours    []int             `json:"slot_hours"`
+	GraceSeconds int               `json:"slot_grace_seconds"`
+	CheckSeconds int               `json:"check_seconds"`
+	Accounts     []string          `json:"accounts"`
+	Models       map[string]string `json:"models"`
+}
+
+func (l legacySettings) migrate() Settings {
+	targets := []Target{}
+	for _, scope := range []string{"codex", "gemini", "third_party"} {
+		targets = append(targets, Target{Scope: scope, Accounts: append([]string(nil), l.Accounts...), Model: l.Models[scope]})
+	}
+	return Settings{Version: 2, Enabled: l.Enabled, SlotHours: l.SlotHours, GraceSeconds: l.GraceSeconds, CheckSeconds: l.CheckSeconds, Targets: targets}
+}
+
+func decodeSettings(b []byte) (Settings, error) {
+	return decodeSettingsVersion(b, true)
+}
+
+// decodeSettingsForWrite accepts only the current schema. Reading a v1 file is
+// a one-way migration for upgrades; allowing a stale v1 page to write it back
+// would flatten the three independent channel targets into one global list.
+func decodeSettingsForWrite(b []byte) (Settings, error) {
+	return decodeSettingsVersion(b, false)
+}
+
+func decodeSettingsVersion(b []byte, allowLegacy bool) (Settings, error) {
+	var probe struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return Settings{}, errors.New("settings decode failed")
+	}
+	if probe.Version == 1 && !allowLegacy {
+		return Settings{}, errors.New("legacy settings are read-only")
+	}
+	if probe.Version == 1 {
+		var legacy legacySettings
+		if err := strict(b, &legacy); err != nil || len(legacy.Models) != 3 {
+			return Settings{}, errors.New("settings decode failed")
+		}
+		s := legacy.migrate()
+		if err := s.validate(); err != nil {
+			return Settings{}, err
+		}
+		return s, nil
+	}
+	var s Settings
+	if err := strict(b, &s); err != nil {
+		return Settings{}, errors.New("settings decode failed")
+	}
+	return s, nil
 }
 func decodeBootstrap(b []byte) (Bootstrap, error) {
 	var c Bootstrap

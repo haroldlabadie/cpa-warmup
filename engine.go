@@ -189,15 +189,11 @@ func (e *Engine) tick(s Settings, now int64) error {
 		return errors.New("credential inventory unavailable")
 	}
 	e.expire(s, now)
-	allowed := map[string]bool{}
-	for _, n := range s.Accounts {
-		allowed[n] = true
-	}
 	for _, a := range accounts {
 		if e.ctx.Err() != nil {
 			return e.ctx.Err()
 		}
-		if len(allowed) > 0 && !allowed[a.Name] {
+		if !accountSelected(s, a) {
 			continue
 		}
 		sample, probeErr := e.api.probe(e.ctx, a)
@@ -232,12 +228,12 @@ func (e *Engine) tick(s Settings, now int64) error {
 			e.observations[a.Name] = sample
 		}
 		e.mu.Unlock()
-		for _, scope := range scopesFor(a) {
-			if err := e.schedule(a, scope, sample, accounts, s, nowMillis()); err != nil {
+		for _, target := range targetsFor(s, a) {
+			if err := e.schedule(a, target.Scope, sample, accounts, s, nowMillis()); err != nil {
 				if err == errStopped || e.ctx.Err() != nil {
 					return err
 				}
-				e.setPartial(a.Name+"/"+scope, err.Error())
+				e.setPartial(a.Name+"/"+target.Scope, err.Error())
 			}
 		}
 	}

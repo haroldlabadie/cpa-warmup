@@ -72,8 +72,9 @@ func configure(raw []byte) error {
 	settings := defaults()
 	b, err = readLimited(cfg.SettingsFile, 65536)
 	if err == nil {
-		if strict(b, &settings) != nil {
-			return errors.New("settings decode failed")
+		settings, err = decodeSettings(b)
+		if err != nil {
+			return err
 		}
 	} else if !os.IsNotExist(err) {
 		return errors.New("settings unavailable")
@@ -121,7 +122,7 @@ func handleMethod(method string, raw []byte) ([]byte, error) {
 	case methodRequestInterceptBefore, methodRequestInterceptAfter:
 		return intercept(method, raw)
 	case methodManagementRegister:
-		return okEnvelope(managementRegistrationResponse{Routes: []managementRoute{{Method: "GET", Path: managementBase + "/status"}, {Method: "GET", Path: managementBase + "/settings"}, {Method: "PUT", Path: managementBase + "/settings"}}, Resources: []resourceRoute{{Path: "/settings", Menu: "定向预热", Description: "只读进度与预热设置"}}})
+		return okEnvelope(managementRegistrationResponse{Routes: []managementRoute{{Method: "GET", Path: managementBase + "/status"}, {Method: "GET", Path: managementBase + "/settings"}, {Method: "PUT", Path: managementBase + "/settings"}, {Method: "GET", Path: managementBase + "/catalog"}}, Resources: []resourceRoute{{Path: "/settings", Menu: "定向预热", Description: "只读进度与预热设置"}}})
 	case methodManagementHandle:
 		return management(raw)
 	default:
@@ -219,6 +220,15 @@ func statusSnapshot(e *Engine) map[string]any {
 	sort.Strings(names)
 	e.mu.Unlock()
 	result["accounts"] = names
+	if inventory, err := inventory(); err == nil {
+		options := make([]map[string]any, 0, len(inventory))
+		for _, a := range inventory {
+			options = append(options, map[string]any{"name": a.Name, "provider": a.Provider, "email": a.Email, "disabled": a.Disabled, "excluded_models": a.Excluded})
+		}
+		result["account_options"] = options
+	} else {
+		result["account_options"] = []map[string]any{}
+	}
 	e.store.mu.Lock()
 	slots := map[string]any{}
 	for sid, records := range e.store.state.Slots {

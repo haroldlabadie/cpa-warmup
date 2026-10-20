@@ -87,6 +87,59 @@ func scopesFor(a Account) []string {
 	return []string{"all"}
 }
 
+// targetsFor keeps one provider's families independent. A scope that is not
+// configured for this provider is never scheduled.
+func targetsFor(s Settings, a Account) []Target {
+	out := []Target{}
+	for _, t := range s.Targets {
+		scope := scopeForTarget(a.Provider, t.Scope)
+		if scopeAllowed(a.Provider, scope) && targetSelected(t, a) {
+			t.Scope = scope
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func targetSelected(t Target, a Account) bool {
+	if len(t.Accounts) == 0 {
+		return true
+	}
+	for _, name := range t.Accounts {
+		if name == a.Name {
+			return true
+		}
+	}
+	return false
+}
+
+func accountSelected(s Settings, a Account) bool {
+	for _, t := range s.Targets {
+		if scopeAllowed(a.Provider, scopeForTarget(a.Provider, t.Scope)) && targetSelected(t, a) {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeForTarget maps the public Codex channel to the credential-wide scope
+// used by the scheduler. Other channels stay as-is so a Codex target cannot
+// accidentally match an Antigravity family (or vice versa).
+func scopeForTarget(provider, scope string) string {
+	if provider == "codex" && scope == "codex" {
+		return "all"
+	}
+	return scope
+}
+
+func targetForScope(s Settings, provider, scope string) (Target, bool) {
+	for _, t := range s.Targets {
+		if scopeForTarget(provider, t.Scope) == scope {
+			return t, true
+		}
+	}
+	return Target{}, false
+}
 func recordKey(name, scope string) string {
 	if scope == "third_party" {
 		return name + "::third_party"
@@ -217,10 +270,11 @@ func (e *Engine) schedule(a Account, scope string, sample *Sample, inventory []A
 	if a.Disabled {
 		return wait("disabled")
 	}
-	model := s.Models[scope]
-	if scope == "all" {
-		model = s.Models["codex"]
+	target, ok := targetForScope(s, a.Provider, scope)
+	if !ok || target.Model == "" {
+		return wait("model-not-configured")
 	}
+	model := target.Model
 	if excluded(a, model) {
 		return wait("model-excluded")
 	}
