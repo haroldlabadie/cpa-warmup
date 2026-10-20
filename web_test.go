@@ -115,9 +115,10 @@ func TestPublicSettingsShellContainsNoRuntimeStateOrSecrets(t *testing.T) {
 	if strings.Contains(js, "innerHTML") || !strings.Contains(js, "cell.textContent=String(value)") || !strings.Contains(js, "option.textContent=name") {
 		t.Fatal("dynamic status/account values must use textContent")
 	}
-	for _, mutation := range []string{"localStorage.setItem", "localStorage.removeItem", "localStorage.clear", "sessionStorage"} {
-		if strings.Contains(js, mutation) {
-			t.Fatal("management token must not be persisted to browser storage")
-		}
+	if !strings.Contains(js, "cpa_warmup_mgmt_key") || !strings.Contains(js, "localStorage.setItem") {
+		t.Fatal("manual management key must persist in browser storage")
+	}
+	if strings.Contains(js, "innerHTML") {
+		t.Fatal("unsafe HTML rendering")
 	}
 }
