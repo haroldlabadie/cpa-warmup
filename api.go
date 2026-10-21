@@ -457,10 +457,20 @@ func (a *API) probe(ctx context.Context, acc Account) (*Sample, error) {
 	}
 	return &Sample{time.Now().UnixMilli(), windows}, nil
 }
+const geminiWarmupPrompt = `Summarize the following passage in about 30 words:
+
+The Domain Name System (DNS) is a hierarchical, decentralized naming system for computers and services connected to the Internet. It translates easily memorized domain names into numerical IP addresses needed for locating and identifying computer services and devices with underlying network protocols. By delegating the responsibility of assigning domain names and mapping those names to Internet resources, DNS provides a globally distributed, fault-tolerant directory service fundamental to modern web infrastructure.`
+
 func (a *API) send(ctx context.Context, model, uuid string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	body, _ := json.Marshal(map[string]any{"model": model, "stream": true, "messages": []map[string]string{{"role": "user", "content": "Reply 1."}}, "reasoning_effort": "low", "max_tokens": 1})
+	content := "Reply 1."
+	maxTokens := 1
+	if modelScope(model) == "gemini" {
+		content = geminiWarmupPrompt
+		maxTokens = 50
+	}
+	body, _ := json.Marshal(map[string]any{"model": model, "stream": true, "messages": []map[string]string{{"role": "user", "content": content}}, "reasoning_effort": "low", "max_tokens": maxTokens})
 	req, e := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(a.cfg.CPAURL, "/")+"/v1/chat/completions", bytes.NewReader(body))
 	if e != nil {
 		return "", errors.New("generation setup failed")

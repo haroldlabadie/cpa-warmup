@@ -193,3 +193,34 @@ func TestSendUsesPublicStreamingEndpointAndDedicatedIdentity(t *testing.T) {
 		t.Fatalf("called=%v trace=%s err=%v", called, trace, err)
 	}
 }
+
+func TestSendUsesGeminiPayloadForGeminiModels(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer prewarm" || r.Header.Get("User-Agent") != "cpa-quota-guard/2 uuid" || r.Header.Get("Idempotency-Key") != "uuid" {
+			t.Error("incorrect public generation identity")
+		}
+		var p map[string]any
+		json.NewDecoder(r.Body).Decode(&p)
+		if p["stream"] != true || p["reasoning_effort"] != "low" || p["max_tokens"] != float64(50) || p["model"] != "prefix/gemini-3.8-flash-high" {
+			t.Errorf("unsafe gemini generation payload %#v", p)
+		}
+		msgs, ok := p["messages"].([]any)
+		if !ok || len(msgs) != 1 {
+			t.Fatalf("unexpected messages: %#v", p["messages"])
+		}
+		first, _ := msgs[0].(map[string]any)
+		if first["content"] != geminiWarmupPrompt {
+			t.Errorf("expected geminiWarmupPrompt, got %#v", first["content"])
+		}
+		w.Header().Set("X-CPA-Trace-ID", "gemini-i-r")
+		w.Write([]byte("data: {\"choices\":[]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	api := newAPI(Bootstrap{CPAURL: server.URL}, Secrets{PrewarmKey: "prewarm"})
+	trace, err := api.send(context.Background(), "prefix/gemini-3.8-flash-high", "uuid")
+	if !called || err != nil || !strings.HasSuffix(trace, "-r") {
+		t.Fatalf("called=%v trace=%s err=%v", called, trace, err)
+	}
+}

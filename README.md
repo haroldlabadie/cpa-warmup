@@ -1,6 +1,6 @@
 # CPA 定向预热
 
-将按凭证、按模型族的定时预热放在 CPA 原生插件内运行。插件独立于额度保护，不修改凭证的 `prefix`、`disabled`、`excluded_models` 或保护所有权。作者：Harold Labadie；MIT；当前版本：0.3.0。
+将按凭证、按模型族的定时预热放在 CPA 原生插件内运行。插件独立于额度保护，不修改凭证的 `prefix`、`disabled`、`excluded_models` 或保护所有权。作者：Harold Labadie；MIT；当前版本：0.3.1。
 
 ## 兼容与依赖
 
@@ -39,7 +39,7 @@ CPA 插件菜单中的“定向预热”按渠道分别配置：先选 Codex、G
 
 ## 证据与失败语义
 
-发送前先持久化 UUID、槽位、账号身份摘要、目标 AuthID/index 和模型。全部请求 `stream=true`、`reasoning_effort=low`、`max_tokens=1`；45 秒超时。SSE/HTTP 200 本身不证明成功。before-auth 绑定可信 caller scope / TraceID / RequestID，after-auth 核实真实 selected AuthID/index；缺失、错投或 journal 写失败会正常返回 `Terminate=true`，不会返回被宿主忽略的 error。
+发送前先持久化 UUID、槽位、账号身份摘要、目标 AuthID/index 和模型。全部请求 `stream=true`、`reasoning_effort=low`；Codex 与第三方模型 `max_tokens=1`、Prompt="Reply 1."；Gemini 模型采用 DNS 摘要 Prompt 与 `max_tokens=50` 确保产生能被 Google 配额池计入的有效消耗以锁定 5 小时重置窗口；45 秒超时。SSE/HTTP 200 本身不证明成功。before-auth 绑定可信 caller scope / TraceID / RequestID，after-auth 核实真实 selected AuthID/index；缺失、错投或 journal 写失败会正常返回 `Terminate=true`，不会返回被宿主忽略的 error。
 
 每次发送前先经 CPAMP 管理代理回读本插件 `/status`，核对当前实例随机 nonce 与工作线程状态。CPA 从 active capability snapshot 构建管理路由；新动态库的旧路由固定旧 RPC client，因此旧实例不能冒充新 nonce。相同动态库重配复用 client，而本插件始终注册相同 before/after 能力，旧 snapshot 也会调用新的内存门控实例。该精确宿主契约变化时需重新验收；状态路由未发布、旧 nonce、错误或暂停均只等待，不用真实生成探测就绪。
 
@@ -99,6 +99,6 @@ CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -o cpa-warmup.so .
 CGO_ENABLED=1 go build -trimpath -o cpa-warmup-helper .
 ```
 
-CI 使用 Ubuntu 22.04 构建兼容 glibc 的 Linux amd64 产物，上传 `cpa-warmup_0.3.0_linux_amd64.zip` 与 `checksums.txt`，不自动创建 GitHub Release。隔离验收必须使用部署镜像、假凭证、假 Key、假上游与 CPAMP event adapter；不能耗尽真实额度或写生产监控库。测试时可以把业务槽位设为当前上海小时来驱动真实 worker，无隐藏生成接口。
+CI 使用 Ubuntu 22.04 构建兼容 glibc 的 Linux amd64 产物，上传 `cpa-warmup_0.3.1_linux_amd64.zip` 与 `checksums.txt`，不自动创建 GitHub Release。隔离验收必须使用部署镜像、假凭证、假 Key、假上游与 CPAMP event adapter；不能耗尽真实额度或写生产监控库。测试时可以把业务槽位设为当前上海小时来驱动真实 worker，无隐藏生成接口。
 
 ABI 声明与管理 envelope 参考 `key-model-access` 的 MIT 实现；来源与许可证见 `THIRD_PARTY_NOTICES.md`。本插件不修改或重新发布现有权限插件。
