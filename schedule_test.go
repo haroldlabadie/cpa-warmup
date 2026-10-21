@@ -137,3 +137,15 @@ func TestDisabledTargetSelectsNoAccount(t *testing.T) {
 		t.Fatal("enabled target should select all accounts")
 	}
 }
+
+func TestStaleUnresolvedPastGraceAndCycleDoesNotBlockNextSlot(t *testing.T) {
+	s := defaults()
+	sent := clockMS(t, "2026-10-19T05:10:00+08:00")
+	old := Record{"status": "unconfirmed", "sent_ms": sent}
+	if staleUnresolved("2026-10-19T05:00+08:00", old, sent+3600000, s) {
+		t.Fatal("record inside its own cycle must keep blocking")
+	}
+	if !staleUnresolved("2026-10-19T05:00+08:00", old, sent+fiveHour+60000, s) {
+		t.Fatal("record past grace and cycle must not block")
+	}
+}

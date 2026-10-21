@@ -252,7 +252,7 @@ func (e *Engine) schedule(a Account, scope string, sample *Sample, inventory []A
 		return nil
 	}
 	for oldid, old := range records {
-		if oldid != sid && unresolved(old) {
+		if oldid != sid && unresolved(old) && !staleUnresolved(oldid, old, now, s) {
 			return wait("unresolved-prior-request")
 		}
 	}
@@ -423,4 +423,15 @@ func sortedSuccessful(events []Event) []Event {
 	out := append([]Event(nil), events...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
 	return out
+}
+
+// staleUnresolved reports whether an older unresolved record is past both its
+// slot grace and its own five-hour cycle, so it cannot block later slots.
+func staleUnresolved(slotID string, old Record, now int64, s Settings) bool {
+	sent := num(old, "sent_ms")
+	if sent <= 0 || now < sent+fiveHour+45000 {
+		return false
+	}
+	t, err := parseSlot(slotID)
+	return err == nil && now >= t.UnixMilli()+int64(s.GraceSeconds)*1000
 }
