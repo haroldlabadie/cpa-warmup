@@ -103,6 +103,8 @@ test("sent-but-unverified requests are labeled honestly and skips are explicit",
   const { outcome } = require("./settings.js");
   assert.equal(outcome({ status: "unconfirmed" }).label, "已发送，待确认");
   assert.equal(outcome({ status: "confirmed" }).label, "已预热");
+  assert.equal(outcome({ status: "request_completed" }).tone, "info");
+  assert.notEqual(outcome({ status: "request_completed" }).tone, "success");
   assert.equal(outcome({ status: "pending", last_reason: "model-excluded" }).label, "已跳过");
   assert.equal(outcome({ status: "error" }).tone, "danger");
 });
