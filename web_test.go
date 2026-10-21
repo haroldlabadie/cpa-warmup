@@ -108,11 +108,28 @@ func TestPublicSettingsShellContainsNoRuntimeStateOrSecrets(t *testing.T) {
 	if out.StatusCode != 200 || !strings.HasPrefix(out.Headers.Get("Content-Type"), "text/html") || out.Headers.Get("Content-Security-Policy") == "" {
 		t.Fatalf("public shell missing headers %#v", out)
 	}
+	csp := out.Headers.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "nonce-") || strings.Contains(csp, "unsafe-inline") {
+		t.Fatalf("CSP header missing nonce or contains unsafe-inline: %q", csp)
+	}
 	html := string(out.Body)
+	if strings.Contains(html, "{{SETTINGS_JS}}") || strings.Contains(html, "/*SETTINGS_JS*/") {
+		t.Fatal("HTML template placeholders for script were not replaced")
+	}
+	if strings.Contains(html, "{{NONCE}}") {
+		t.Fatal("HTML template placeholders for nonce were not replaced")
+	}
+	if !strings.Contains(html, "cpa_warmup_mgmt_key") {
+		t.Fatal("HTML does not include embedded settings.js logic")
+	}
 	for _, secret := range []string{e.api.secrets.ManagementKey, e.api.secrets.PrewarmKey, e.lastError, "secret-slot-unique", "private-account-unique"} {
 		if strings.Contains(html, secret) {
 			t.Fatalf("public static resource leaked runtime %q", secret)
 		}
+	}
+	head := callManagement(t, managementRequest{Method: "HEAD", Path: "/v0/resource/plugins/cpa-warmup/settings"})
+	if head.StatusCode != 200 || len(head.Body) != 0 {
+		t.Fatalf("HEAD request failed: %#v", head)
 	}
 	js := string(pageScript)
 	if strings.Contains(js, "innerHTML") || !strings.Contains(js, "textContent") || !strings.Contains(js, "createElement") {

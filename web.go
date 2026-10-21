@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -17,14 +19,40 @@ var page []byte
 var pageScript []byte
 
 func nowMS() int64 { return nowMillis() }
+
+func settingsPage(head bool) ([]byte, error) {
+	nonceBytes := make([]byte, 18)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return nil, err
+	}
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+	replacer := strings.NewReplacer(
+		"{{NONCE}}", nonce,
+		"{{SETTINGS_JS}}", string(pageScript),
+		"/*SETTINGS_JS*/", string(pageScript),
+	)
+	body := []byte(replacer.Replace(string(page)))
+	if head {
+		body = nil
+	}
+	headers := http.Header{
+		"Content-Type":           []string{"text/html; charset=utf-8"},
+		"Cache-Control":          []string{"no-store"},
+		"Content-Security-Policy": []string{"default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'nonce-" + nonce + "'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'"},
+		"Referrer-Policy":        []string{"no-referrer"},
+		"X-Content-Type-Options": []string{"nosniff"},
+	}
+	return okEnvelope(managementResponse{StatusCode: 200, Headers: headers, Body: body})
+}
+
 func management(raw []byte) ([]byte, error) {
 	var req managementRequest
 	if json.Unmarshal(raw, &req) != nil {
 		return managementJSON(400, map[string]string{"error": "invalid management request"}, nil)
 	}
 	p := strings.TrimRight(req.Path, "/")
-	if req.Method == "GET" && p == "/v0/resource/plugins/cpa-warmup/settings" {
-		return okEnvelope(managementResponse{StatusCode: 200, Headers: http.Header{"Content-Type": []string{"text/html; charset=utf-8"}, "Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'"}}, Body: []byte(strings.Replace(string(page), "/*SETTINGS_JS*/", string(pageScript), 1))})
+	if (req.Method == "GET" || req.Method == "HEAD") && p == "/v0/resource/plugins/cpa-warmup/settings" {
+		return settingsPage(req.Method == "HEAD")
 	}
 	e := current()
 	if e == nil {
