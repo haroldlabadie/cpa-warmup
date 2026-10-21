@@ -36,10 +36,15 @@ func (e *Engine) confirm(a Account, r Record, sample *Sample, now int64) error {
 		return errors.New("historical model family mismatch")
 	}
 	retire := laterCycleEligible(a, r, sample, now)
+	abandon := !retire && expiredWithoutActiveCycle(r, sample, now)
 	decided, queryErr := e.queryAttempt(a, r, sample, now)
 	if queryErr != nil {
 		if retire {
 			markRetired(r, sample, now)
+			return nil
+		}
+		if abandon {
+			markExpired(r, now)
 			return nil
 		}
 		return queryErr
@@ -49,6 +54,8 @@ func (e *Engine) confirm(a Account, r Record, sample *Sample, now int64) error {
 	}
 	if retire {
 		markRetired(r, sample, now)
+	} else if abandon {
+		markExpired(r, now)
 	}
 	return nil
 }
@@ -80,6 +87,60 @@ func laterCycleEligible(a Account, r Record, sample *Sample, now int64) bool {
 	return w.used() > 0 || stable
 }
 
+// rollingHint reports whether the family advertises a rolling five-hour hint
+// instead of a real cycle. A real cycle, even one whose usage rounds down to
+// zero, keeps a fixed reset boundary; a rolling hint moves forward by exactly
+// the elapsed observation time. Two fresh samples at least ten seconds apart
+// with that exact lockstep therefore prove no cycle is running. A single
+// sample never does, and a jittering boundary never does.
+func rollingHint(r Record, w *Window, sample *Sample, now int64) bool {
+	if w == nil || sample == nil || now <= 0 || sample.Observed <= 0 || sample.Observed > now || now-sample.Observed > 90000 {
+		return false
+	}
+	candidate := obj(r["rolling_hint"])
+	previous := num(candidate, "observed_ms")
+	previousEnd := num(candidate, "end_ms")
+	delta := sample.Observed - previous
+	moved := abs(w.EndMS - previousEnd)
+	rolling := previous > 0 && previous <= now && delta >= 10000 && delta <= 90000 &&
+		str(candidate, "scope") == w.Scope && num(candidate, "duration_ms") == w.Duration &&
+		abs(delta-moved) <= 3000
+	// Cache only a fresh, time-valid observation; a stale or invalid sample
+	// must not poison the next comparison.
+	r["rolling_hint"] = Record{"observed_ms": sample.Observed, "end_ms": w.EndMS, "scope": w.Scope, "duration_ms": w.Duration}
+	return rolling
+}
+
+// expiredWithoutActiveCycle reports whether an unresolved record own cycle is
+// provably over while nothing is running. Upstream answers with a rolling hint
+// whenever no cycle is active, and such a hint can never satisfy the stable
+// boundary laterCycleEligible requires; without this branch a family whose
+// warmup usage rounds down to zero would block every later slot forever.
+func expiredWithoutActiveCycle(r Record, sample *Sample, now int64) bool {
+	sent := num(r, "sent_ms")
+	if sent <= 0 || sample == nil {
+		return false
+	}
+	// The request longest execution plus its own five-hour cycle must be over.
+	if now < sent+fiveHour+45000 {
+		return false
+	}
+	w := warmWindow(sample, str(r, "scope"))
+	if w == nil || w.Duration != fiveHour || w.EndMS <= now || w.used() > 0 {
+		return false
+	}
+	return rollingHint(r, w, sample, now)
+}
+
+// markExpired closes an unresolved record whose own cycle is provably over
+// while no cycle is running. It records no recovery boundary and never claims
+// that the request succeeded.
+func markExpired(r Record, now int64) {
+	r["status"] = "uncertainty_expired"
+	r["retired_ms"] = now
+	r["retirement"] = "expired-without-active-cycle"
+	r["last_reason"] = "cycle-ended:no-active-cycle"
+}
 func markRetired(r Record, sample *Sample, now int64) {
 	w := warmWindow(sample, str(r, "scope"))
 	if w == nil {

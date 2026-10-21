@@ -230,12 +230,27 @@ func (e *Engine) tick(s Settings, now int64) error {
 			e.observations[a.Name] = sample
 		}
 		e.mu.Unlock()
+		scheduled := map[string]bool{}
 		for _, target := range targetsFor(s, a) {
+			scheduled[target.Scope] = true
 			if err := e.schedule(a, target.Scope, sample, accounts, s, nowMillis()); err != nil {
 				if err == errStopped || e.ctx.Err() != nil {
 					return err
 				}
 				e.setPartial(a.Name+"/"+target.Scope, err.Error())
+			}
+		}
+		// A family without an enabled target still needs its unresolved history
+		// closed; retirement evidence is independent of scheduling.
+		for _, scope := range scopesFor(a) {
+			if scheduled[scope] {
+				continue
+			}
+			if err := e.reconcileScope(a, scope, sample, nowMillis()); err != nil {
+				if err == errStopped || e.ctx.Err() != nil {
+					return err
+				}
+				e.setPartial(a.Name+"/"+scope, err.Error())
 			}
 		}
 	}

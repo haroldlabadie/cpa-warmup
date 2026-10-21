@@ -14,7 +14,7 @@ const (
 	pluginID                       = "cpa-warmup"
 )
 
-var pluginVersion = "0.3.1"
+var pluginVersion = "0.3.2"
 
 const (
 	methodPluginRegister         = "plugin.register"

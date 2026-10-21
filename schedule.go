@@ -198,6 +198,30 @@ func (e *Engine) put(slot, key string, r Record) error {
 	return nil
 }
 
+// reconcileScope advances unresolved history for one family even when that
+// channel is currently disabled or unselected. Retirement must not depend on
+// a channel staying enabled: otherwise a disabled family keeps records
+// unresolved forever and inherits a permanent block once it is re-enabled.
+// It never sends a request; only confirm() may change a record here.
+func (e *Engine) reconcileScope(a Account, scope string, sample *Sample, now int64) error {
+	key := recordKey(a.Name, scope)
+	for sid, r := range e.records(key) {
+		if !unresolved(r) || !scopeAllowed(a.Provider, str(r, "scope")) {
+			continue
+		}
+		if err := e.confirm(a, r, sample, now); err != nil {
+			if err == errStopped {
+				return err
+			}
+			r["last_reason"] = "event-query-unknown"
+		}
+		if err := e.put(sid, key, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *Engine) schedule(a Account, scope string, sample *Sample, inventory []Account, s Settings, now int64) error {
 	key := recordKey(a.Name, scope)
 	start, reason := e.ensureIdentity(a)
@@ -365,7 +389,7 @@ func (e *Engine) schedule(a Account, scope string, sample *Sample, inventory []A
 	if err != nil {
 		return err
 	}
-	for _, field := range []string{"request_id", "trace", "transport_error", "boundary_candidate"} {
+	for _, field := range []string{"request_id", "trace", "transport_error", "boundary_candidate", "recovery_boundary", "rolling_hint"} {
 		delete(r, field)
 	}
 	r["status"] = "sending"
