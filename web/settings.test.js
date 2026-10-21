@@ -99,10 +99,16 @@ test("timezone, window and buffer are validated and saved", () => {
   assert.throws(() => buildSettings(prev, { ...form, graceMinutes: "5" }));
   assert.throws(() => buildSettings(prev, { ...form, bufferSeconds: "1" }));
 });
-test("unconfirmed states are presented as in-progress, not undecided", () => {
-  const { labels, tone } = require("./settings.js");
-  assert.equal(labels.unconfirmed, "核实中");
-  assert.equal(labels.confirmed, "已预热");
-  assert.equal(tone("skipped"), "");
-  assert.equal(tone("error"), "danger");
+test("sent-but-unverified requests are labeled honestly and skips are explicit", () => {
+  const { outcome } = require("./settings.js");
+  assert.equal(outcome({ status: "unconfirmed" }).label, "已发送，待确认");
+  assert.equal(outcome({ status: "confirmed" }).label, "已预热");
+  assert.equal(outcome({ status: "pending", last_reason: "model-excluded" }).label, "已跳过");
+  assert.equal(outcome({ status: "error" }).tone, "danger");
+});
+test("disabled target is preserved when building settings", () => {
+  const prev = { version: 2, slot_grace_seconds: 5400, check_seconds: 20 };
+  const built = buildSettings(prev, { enabled: true, hours: "5", targets: [{scope:"codex",accounts:[],model:"a",disabled:true},{scope:"gemini",accounts:[],model:"b"},{scope:"third_party",accounts:[],model:"c"}] });
+  assert.equal(built.targets[0].disabled, true);
+  assert.equal(built.targets[1].disabled, false);
 });

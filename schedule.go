@@ -102,6 +102,9 @@ func targetsFor(s Settings, a Account) []Target {
 }
 
 func targetSelected(t Target, a Account) bool {
+	if t.Disabled {
+		return false
+	}
 	if len(t.Accounts) == 0 {
 		return true
 	}

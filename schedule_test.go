@@ -126,3 +126,14 @@ func TestExpireRetainsHistoricalUnknownButSkipsPending(t *testing.T) {
 		t.Fatalf("expired pending not skipped %#v", r)
 	}
 }
+func TestDisabledTargetSelectsNoAccount(t *testing.T) {
+	a := Account{Name: "x.json", Provider: "codex"}
+	s := Settings{Targets: []Target{{Scope: "codex", Disabled: true}}}
+	if accountSelected(s, a) || len(targetsFor(s, a)) != 0 {
+		t.Fatal("disabled target must not warm any account")
+	}
+	s.Targets[0].Disabled = false
+	if !accountSelected(s, a) {
+		t.Fatal("enabled target should select all accounts")
+	}
+}

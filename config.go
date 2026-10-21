@@ -43,6 +43,7 @@ type Target struct {
 	Scope    string   `json:"scope"`
 	Accounts []string `json:"accounts"`
 	Model    string   `json:"model"`
+	Disabled bool     `json:"disabled"`
 }
 type Secrets struct {
 	ManagementKey string `json:"management_key"`
