@@ -77,11 +77,32 @@ test("long account names stay on one line in account pickers and records", () =>
   assert.match(html, /\.sample-file\{[^}]*text-overflow:ellipsis[^}]*white-space:nowrap/);
   assert.match(html, /\.record-title strong\{[^}]*text-overflow:ellipsis/);
 });
-test("channels are ordered Codex, Gemini, Claude / GPT and use custom pickers", () => {
+test("providers nest Antigravity model groups and plan has no duplicate summary", () => {
   const html = fs.readFileSync(__dirname + "/settings.html", "utf8");
-  const codex = html.indexOf("Codex</strong>"), gemini = html.indexOf("Gemini</strong>"), third = html.indexOf("Claude / GPT</strong>");
-  assert.ok(codex > 0 && codex < gemini && gemini < third);
+  const codex = html.indexOf("<strong>Codex</strong>"), ag = html.indexOf("<strong>Antigravity</strong>"), gem = html.indexOf("<strong>Gemini</strong>"), third = html.indexOf("<strong>Claude / GPT</strong>");
+  assert.ok(codex > 0 && codex < ag && ag < gem && gem < third);
   assert.doesNotMatch(html, /<select[\s>]/);
-  assert.doesNotMatch(html, /最近槽位/);
-  assert.match(html, /预热执行记录/);
+  assert.doesNotMatch(html, /本次计划|自动执行|最近槽位/);
+  assert.match(html, /id="timezone"/);
+  assert.match(html, /id="grace"/);
+  assert.match(html, /id="buffer"/);
+  assert.match(html, /\.multi-button,\.select-button\{height:38px/);
+});
+test("timezone, window and buffer are validated and saved", () => {
+  const prev = { version: 2, slot_grace_seconds: 5400, check_seconds: 20 };
+  const form = { enabled: true, hours: "5", targets: [{scope:"codex",accounts:[],model:"a"},{scope:"gemini",accounts:[],model:"b"},{scope:"third_party",accounts:[],model:"c"}] };
+  const built = buildSettings(prev, { ...form, timezone: "America/New_York", graceMinutes: "120", bufferSeconds: "30" });
+  assert.equal(built.timezone, "America/New_York");
+  assert.equal(built.slot_grace_seconds, 7200);
+  assert.equal(built.reset_buffer_seconds, 30);
+  assert.throws(() => buildSettings(prev, { ...form, timezone: "Not/AZone" }));
+  assert.throws(() => buildSettings(prev, { ...form, graceMinutes: "5" }));
+  assert.throws(() => buildSettings(prev, { ...form, bufferSeconds: "1" }));
+});
+test("unconfirmed states are presented as in-progress, not undecided", () => {
+  const { labels, tone } = require("./settings.js");
+  assert.equal(labels.unconfirmed, "核实中");
+  assert.equal(labels.confirmed, "已预热");
+  assert.equal(tone("skipped"), "");
+  assert.equal(tone("error"), "danger");
 });

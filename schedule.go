@@ -295,7 +295,7 @@ func (e *Engine) schedule(a Account, scope string, sample *Sample, inventory []A
 		return wait("quota-boundary-unknown")
 	}
 	if until > 0 {
-		due := until + 15000
+		due := until + s.bufferMS()
 		if due >= slotStart+int64(s.GraceSeconds)*1000 {
 			if scope == "third_party" {
 				r["status"] = "skipped"
@@ -308,14 +308,14 @@ func (e *Engine) schedule(a Account, scope string, sample *Sample, inventory []A
 		r["deferred_until_ms"] = due
 		return wait(fmt.Sprintf("active:%d", until))
 	}
-	if scope != "third_party" && num(r, "deferred_until_ms") != w.EndMS+15000 {
+	if scope != "third_party" && num(r, "deferred_until_ms") != w.EndMS+s.bufferMS() {
 		delete(r, "deferred_until_ms")
 	}
 	if now < num(r, "deferred_until_ms") || now < num(r, "next_attempt_ms") {
 		return wait("reset-buffer-or-retry-delay")
 	}
 	// Even an expired zero bucket must pass its advertised boundary + 15s.
-	if w.EndMS <= now && now < w.EndMS+15000 {
+	if w.EndMS <= now && now < w.EndMS+s.bufferMS() {
 		return wait("reset-buffer")
 	}
 	if num(r, "attempts") >= 3 {

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
+	_ "time/tzdata"
 )
 
 type Bootstrap struct {
@@ -30,6 +32,8 @@ type Settings struct {
 	SlotHours    []int    `json:"slot_hours"`
 	GraceSeconds int      `json:"slot_grace_seconds"`
 	CheckSeconds int      `json:"check_seconds"`
+	Timezone     string   `json:"timezone"`
+	BufferSeconds int     `json:"reset_buffer_seconds"`
 	Targets      []Target `json:"targets"`
 }
 
@@ -46,14 +50,14 @@ type Secrets struct {
 }
 
 func defaults() Settings {
-	return Settings{Version: 2, Enabled: true, SlotHours: []int{5, 10, 15, 20}, GraceSeconds: 5400, CheckSeconds: 20, Targets: []Target{
+	return Settings{Version: 2, Enabled: true, SlotHours: []int{5, 10, 15, 20}, GraceSeconds: 5400, CheckSeconds: 20, Timezone: defaultTimezone, BufferSeconds: 15, Targets: []Target{
 		{Scope: "codex", Accounts: []string{}, Model: "gpt-6-luna"},
 		{Scope: "gemini", Accounts: []string{}, Model: "gemini-3.8-flash-high"},
 		{Scope: "third_party", Accounts: []string{}, Model: "claude-sonnet-4-6"},
 	}}
 }
 func (s Settings) validate() error {
-	if s.Version != 2 || s.GraceSeconds != 5400 || s.CheckSeconds < 5 || s.CheckSeconds > 300 || len(s.SlotHours) == 0 || len(s.SlotHours) > 24 {
+	if s.Version != 2 || s.GraceSeconds < 600 || s.GraceSeconds > 10800 || s.BufferSeconds > 300 || (s.Timezone != "" && !validTimezone(s.Timezone)) || (s.BufferSeconds != 0 && s.BufferSeconds < 5) || s.CheckSeconds < 5 || s.CheckSeconds > 300 || len(s.SlotHours) == 0 || len(s.SlotHours) > 24 {
 		return errors.New("invalid schedule")
 	}
 	seen := map[int]bool{}
@@ -88,6 +92,42 @@ func (s Settings) validate() error {
 	return nil
 }
 
+const defaultTimezone = "Asia/Shanghai"
+
+func validTimezone(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
+}
+
+func (s Settings) loc() *time.Location {
+	if l, err := time.LoadLocation(s.Timezone); err == nil && s.Timezone != "" {
+		return l
+	}
+	return tz
+}
+
+func (s Settings) bufferMS() int64 {
+	if s.BufferSeconds <= 0 {
+		return 15000
+	}
+	return int64(s.BufferSeconds) * 1000
+}
+
+// withDefaults fills fields added after the first release so older saved
+// files keep their original behavior (Shanghai, 15 second buffer).
+func (s Settings) withDefaults() Settings {
+	if s.Timezone == "" {
+		s.Timezone = defaultTimezone
+	}
+	if s.BufferSeconds == 0 {
+		s.BufferSeconds = 15
+	}
+	return s
+}
+
 // legacySettings accepts version 1 files so an upgrade never drops a live
 // plan. A v1 account list applies to every scope, matching its former global
 // semantics; an empty list keeps the former "all supported accounts" meaning.
@@ -106,7 +146,7 @@ func (l legacySettings) migrate() Settings {
 	for _, scope := range []string{"codex", "gemini", "third_party"} {
 		targets = append(targets, Target{Scope: scope, Accounts: append([]string(nil), l.Accounts...), Model: l.Models[scope]})
 	}
-	return Settings{Version: 2, Enabled: l.Enabled, SlotHours: l.SlotHours, GraceSeconds: l.GraceSeconds, CheckSeconds: l.CheckSeconds, Targets: targets}
+	return Settings{Version: 2, Enabled: l.Enabled, SlotHours: l.SlotHours, GraceSeconds: l.GraceSeconds, CheckSeconds: l.CheckSeconds, Timezone: defaultTimezone, BufferSeconds: 15, Targets: targets}
 }
 
 func decodeSettings(b []byte) (Settings, error) {
@@ -145,7 +185,7 @@ func decodeSettingsVersion(b []byte, allowLegacy bool) (Settings, error) {
 	if err := strict(b, &s); err != nil {
 		return Settings{}, errors.New("settings decode failed")
 	}
-	return s, nil
+	return s.withDefaults(), nil
 }
 func decodeBootstrap(b []byte) (Bootstrap, error) {
 	var c Bootstrap

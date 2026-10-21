@@ -120,10 +120,11 @@ func (e *Engine) stop() {
 	e.store.close()
 }
 func slotAt(now int64, s Settings) (string, int64) {
-	t := time.UnixMilli(now).In(tz)
+	loc := s.loc()
+	t := time.UnixMilli(now).In(loc)
 	var best time.Time
 	for _, h := range s.SlotHours {
-		candidate := time.Date(t.Year(), t.Month(), t.Day(), h, 0, 0, 0, tz)
+		candidate := time.Date(t.Year(), t.Month(), t.Day(), h, 0, 0, 0, loc)
 		if !candidate.After(t) && candidate.After(best) {
 			best = candidate
 		}
@@ -134,11 +135,12 @@ func slotAt(now int64, s Settings) (string, int64) {
 	return best.Format("2006-01-02T15:04-07:00"), best.UnixMilli()
 }
 func nextSlot(now int64, s Settings) string {
-	t := time.UnixMilli(now).In(tz)
+	loc := s.loc()
+	t := time.UnixMilli(now).In(loc)
 	for d := 0; d < 2; d++ {
 		day := t.AddDate(0, 0, d)
 		for _, h := range s.SlotHours {
-			x := time.Date(day.Year(), day.Month(), day.Day(), h, 0, 0, 0, tz)
+			x := time.Date(day.Year(), day.Month(), day.Day(), h, 0, 0, 0, loc)
 			if x.After(t) {
 				return x.Format(time.RFC3339)
 			}
@@ -260,7 +262,7 @@ func (e *Engine) tick(s Settings, now int64) error {
 func (e *Engine) expire(s Settings, now int64) {
 	e.store.mu.Lock()
 	defer e.store.mu.Unlock()
-	cutoff := time.UnixMilli(now).In(tz).AddDate(0, 0, -7).Format("2006-01-02")
+	cutoff := time.UnixMilli(now).In(s.loc()).AddDate(0, 0, -7).Format("2006-01-02")
 	for sid, rs := range e.store.state.Slots {
 		t, err := parseSlot(sid)
 		if err != nil {
