@@ -27,14 +27,14 @@ type Bootstrap struct {
 	SettingsFile string    `yaml:"settings_file"`
 }
 type Settings struct {
-	Version      int      `json:"version"`
-	Enabled      bool     `json:"enabled"`
-	SlotHours    []int    `json:"slot_hours"`
-	GraceSeconds int      `json:"slot_grace_seconds"`
-	CheckSeconds int      `json:"check_seconds"`
-	Timezone     string   `json:"timezone"`
-	BufferSeconds int     `json:"reset_buffer_seconds"`
-	Targets      []Target `json:"targets"`
+	Version       int      `json:"version"`
+	Enabled       bool     `json:"enabled"`
+	SlotHours     []int    `json:"slot_hours"`
+	GraceSeconds  int      `json:"slot_grace_seconds"`
+	CheckSeconds  int      `json:"check_seconds"`
+	Timezone      string   `json:"timezone"`
+	BufferSeconds int      `json:"reset_buffer_seconds"`
+	Targets       []Target `json:"targets"`
 }
 
 // Target keeps each warmup channel independent. Codex has one provider-wide

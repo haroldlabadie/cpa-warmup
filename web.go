@@ -36,11 +36,11 @@ func settingsPage(head bool) ([]byte, error) {
 		body = nil
 	}
 	headers := http.Header{
-		"Content-Type":           []string{"text/html; charset=utf-8"},
-		"Cache-Control":          []string{"no-store"},
+		"Content-Type":            []string{"text/html; charset=utf-8"},
+		"Cache-Control":           []string{"no-store"},
 		"Content-Security-Policy": []string{"default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'nonce-" + nonce + "'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'"},
-		"Referrer-Policy":        []string{"no-referrer"},
-		"X-Content-Type-Options": []string{"nosniff"},
+		"Referrer-Policy":         []string{"no-referrer"},
+		"X-Content-Type-Options":  []string{"nosniff"},
 	}
 	return okEnvelope(managementResponse{StatusCode: 200, Headers: headers, Body: body})
 }

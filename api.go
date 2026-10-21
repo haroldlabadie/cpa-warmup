@@ -457,6 +457,7 @@ func (a *API) probe(ctx context.Context, acc Account) (*Sample, error) {
 	}
 	return &Sample{time.Now().UnixMilli(), windows}, nil
 }
+
 const geminiWarmupPrompt = `Summarize the following passage in about 30 words:
 
 The Domain Name System (DNS) is a hierarchical, decentralized naming system for computers and services connected to the Internet. It translates easily memorized domain names into numerical IP addresses needed for locating and identifying computer services and devices with underlying network protocols. By delegating the responsibility of assigning domain names and mapping those names to Internet resources, DNS provides a globally distributed, fault-tolerant directory service fundamental to modern web infrastructure.`
